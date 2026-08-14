@@ -153,23 +153,15 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Mobile / Tablet Menu Buttons */}
-        <div className="lg:hidden flex items-center gap-3">
-          <button
-            onClick={onOpenBooking}
-            className="bg-zinc-950 hover:bg-[#1EB8BF] text-[#1EB8BF] hover:text-black px-3.5 py-2 rounded-xl font-black text-xs flex items-center gap-1.5 border-2 border-[#1EB8BF] transition-all"
-            title="Reservar turno"
-          >
-            <Calendar className="w-4 h-4 text-current" />
-            <span className="hidden sm:inline">RESERVAR</span>
-          </button>
-
+        {/* Mobile / Tablet Menu Button */}
+        <div className="lg:hidden flex items-center">
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             className="p-2 rounded-xl bg-zinc-950 border-2 border-white/20 text-white hover:border-[#1EB8BF] hover:text-[#1EB8BF] transition-all"
             title="Abrir menú"
+            aria-label="Abrir menú de navegación"
           >
-            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
         </div>
 
