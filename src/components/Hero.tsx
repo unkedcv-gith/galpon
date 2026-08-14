@@ -242,8 +242,8 @@ export const Hero: React.FC<HeroProps> = () => {
 
         </div>
 
-        {/* Subtle Floating WhatsApp Circular Badge with Surrounding Text (Placed to the side) */}
-        <div className="absolute bottom-24 right-4 sm:bottom-28 sm:right-8 lg:right-12 z-20">
+        {/* Subtle Floating WhatsApp Circular Badge with Surrounding Text (Placed to the side / bottom) */}
+        <div className="absolute bottom-3 right-3 sm:bottom-28 sm:right-8 lg:right-12 z-20">
           <a
             href={`${BRAND_INFO.whatsappUrl}?text=${encodeURIComponent('Hola! Quisiera consultar más información sobre las actividades y cumpleaños en El Galpón.')}`}
             target="_blank"
@@ -252,7 +252,7 @@ export const Hero: React.FC<HeroProps> = () => {
             title="Consultar por WhatsApp"
           >
             {/* Outer Circular SVG with Curved Rotating Text */}
-            <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center">
+            <div className="relative w-20 h-20 sm:w-28 sm:h-28 flex items-center justify-center">
               <svg 
                 className="absolute inset-0 w-full h-full animate-[spin_18s_linear_infinite] group-hover:animate-[spin_8s_linear_infinite] pointer-events-none drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]" 
                 viewBox="0 0 100 100"
@@ -276,15 +276,15 @@ export const Hero: React.FC<HeroProps> = () => {
               </svg>
 
               {/* Central WhatsApp Round Button */}
-              <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-[#25D366] text-white flex items-center justify-center shadow-[0_0_20px_rgba(37,211,102,0.6)] border-2 border-white group-hover:bg-[#1EB8BF] transition-all duration-300">
-                <MessageCircle className="w-6 h-6 sm:w-7 sm:h-7 text-white fill-white/20" />
+              <div className="w-9 h-9 sm:w-13 sm:h-13 rounded-full bg-[#25D366] text-white flex items-center justify-center shadow-[0_0_20px_rgba(37,211,102,0.6)] border-2 border-white group-hover:bg-[#1EB8BF] transition-all duration-300">
+                <MessageCircle className="w-5 h-5 sm:w-7 sm:h-7 text-white fill-white/20" />
               </div>
             </div>
           </a>
         </div>
 
-        {/* Bottom Bar: Rapid Activity Direct Pills */}
-        <div className="pt-6 border-t border-white/10 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+        {/* Bottom Bar: Rapid Activity Direct Pills - Hidden on mobile, visible on sm and up */}
+        <div className="pt-6 border-t border-white/10 hidden sm:grid sm:grid-cols-4 gap-3 text-center">
           <div className="bg-black/50 border border-white/15 backdrop-blur-md rounded-xl p-2.5">
             <div className="text-[10px] font-bold text-zinc-300 uppercase">Aventura</div>
             <div className="text-xs font-black text-white uppercase">Muro & Tirolesa</div>
