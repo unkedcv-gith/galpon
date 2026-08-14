@@ -138,6 +138,7 @@ export const Hero: React.FC<HeroProps> = () => {
             }
             videoRef.current = el;
           }}
+          src="/video.mp4"
           autoPlay
           loop
           muted
