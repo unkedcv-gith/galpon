@@ -23,6 +23,11 @@ const USERS_KEY = 'up_galpon_users_v2';
 const INQUIRIES_KEY = 'up_galpon_inquiries_v2';
 const AUTH_USER_KEY = 'up_galpon_auth_user_v2';
 
+// Helper to remove any undefined fields before Firestore operations
+const sanitizeForFirestore = <T>(obj: T): T => {
+  return JSON.parse(JSON.stringify(obj));
+};
+
 // -------------------------------------------------------------
 // BRANCHES (SUCURSALES) MANAGEMENT
 // -------------------------------------------------------------
@@ -54,12 +59,12 @@ export const addBranch = async (branchData: Omit<Branch, 'id' | 'createdAt'>): P
   const updated = [...current, newBranch];
   saveBranches(updated);
 
-  // Sync with Firestore asynchronously
+  // Sync to Firestore in background without blocking UI
   try {
     const branchRef = doc(db, 'branches', branchId);
-    await setDoc(branchRef, newBranch);
+    setDoc(branchRef, sanitizeForFirestore(newBranch)).catch((e) => console.warn('Firestore branch sync:', e));
   } catch (err) {
-    console.warn('Firestore branch sync notice:', err);
+    console.warn('Firestore branch sync error:', err);
   }
 
   return newBranch;
@@ -72,9 +77,9 @@ export const updateBranch = async (id: string, branchData: Partial<Branch>): Pro
 
   try {
     const branchRef = doc(db, 'branches', id);
-    await updateDoc(branchRef, branchData);
+    updateDoc(branchRef, sanitizeForFirestore(branchData)).catch((e) => console.warn('Firestore update:', e));
   } catch (err) {
-    console.warn('Firestore branch update notice:', err);
+    console.warn('Firestore branch update error:', err);
   }
 
   return updated;
@@ -87,9 +92,9 @@ export const deleteBranch = async (id: string): Promise<Branch[]> => {
 
   try {
     const branchRef = doc(db, 'branches', id);
-    await deleteDoc(branchRef);
+    deleteDoc(branchRef).catch((e) => console.warn('Firestore delete:', e));
   } catch (err) {
-    console.warn('Firestore branch delete notice:', err);
+    console.warn('Firestore branch delete error:', err);
   }
 
   return updated;
@@ -128,9 +133,9 @@ export const addAppUser = async (userData: Omit<AppUser, 'uid' | 'createdAt'>): 
 
   try {
     const userRef = doc(db, 'users', uid);
-    await setDoc(userRef, newUser);
+    setDoc(userRef, sanitizeForFirestore(newUser)).catch((e) => console.warn('Firestore user sync:', e));
   } catch (err) {
-    console.warn('Firestore user sync notice:', err);
+    console.warn('Firestore user sync error:', err);
   }
 
   return newUser;
@@ -143,9 +148,9 @@ export const updateAppUser = async (uid: string, userData: Partial<AppUser>): Pr
 
   try {
     const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, userData);
+    updateDoc(userRef, sanitizeForFirestore(userData)).catch((e) => console.warn('Firestore user update:', e));
   } catch (err) {
-    console.warn('Firestore user update notice:', err);
+    console.warn('Firestore user update error:', err);
   }
 
   return updated;
@@ -158,9 +163,9 @@ export const deleteAppUser = async (uid: string): Promise<AppUser[]> => {
 
   try {
     const userRef = doc(db, 'users', uid);
-    await deleteDoc(userRef);
+    deleteDoc(userRef).catch((e) => console.warn('Firestore user delete:', e));
   } catch (err) {
-    console.warn('Firestore user delete notice:', err);
+    console.warn('Firestore user delete error:', err);
   }
 
   return updated;
@@ -240,10 +245,13 @@ export const addReservation = async (
   const updated = [newReservation, ...current];
   saveReservations(updated);
 
-  // Push to Firestore
+  // Sync to Firestore asynchronously in background (never blocks UI)
   try {
     const resRef = doc(db, 'bookings', id);
-    await setDoc(resRef, newReservation);
+    const sanitized = sanitizeForFirestore(newReservation);
+    setDoc(resRef, sanitized).catch((err) => {
+      console.warn('Firestore booking background sync notice:', err);
+    });
   } catch (err) {
     console.warn('Firestore booking sync notice:', err);
   }
@@ -277,11 +285,12 @@ export const updateReservationStatus = async (
   if (updatedItem) {
     try {
       const resRef = doc(db, 'bookings', id);
-      await updateDoc(resRef, {
+      const updates = sanitizeForFirestore({
         status,
         depositPaid: (updatedItem as Reservation).depositPaid,
         depositAmount: (updatedItem as Reservation).depositAmount,
       });
+      updateDoc(resRef, updates).catch((e) => console.warn('Firestore update:', e));
     } catch (err) {
       console.warn('Firestore booking update notice:', err);
     }
@@ -297,7 +306,7 @@ export const deleteReservation = async (id: string): Promise<Reservation[]> => {
 
   try {
     const resRef = doc(db, 'bookings', id);
-    await deleteDoc(resRef);
+    deleteDoc(resRef).catch((e) => console.warn('Firestore delete:', e));
   } catch (err) {
     console.warn('Firestore booking delete notice:', err);
   }
@@ -346,7 +355,7 @@ export const addInquiry = async (
 
   try {
     const inqRef = doc(db, 'inquiries', id);
-    await setDoc(inqRef, newInquiry);
+    setDoc(inqRef, sanitizeForFirestore(newInquiry)).catch((e) => console.warn('Firestore inquiry sync:', e));
   } catch (err) {
     console.warn('Firestore inquiry sync notice:', err);
   }
@@ -361,7 +370,7 @@ export const updateInquiryStatus = async (id: string, status: Inquiry['status'])
 
   try {
     const inqRef = doc(db, 'inquiries', id);
-    await updateDoc(inqRef, { status });
+    updateDoc(inqRef, { status }).catch((e) => console.warn('Firestore inquiry update:', e));
   } catch (err) {
     console.warn('Firestore inquiry update notice:', err);
   }
@@ -426,7 +435,6 @@ export const syncWithRemoteFirestore = async (): Promise<void> => {
       if (remoteBookings.length > 0) saveReservations(remoteBookings);
     }
   } catch (e) {
-    // Graceful offline fallback
     console.log('Running with local high-speed storage & sync ready');
   }
 };

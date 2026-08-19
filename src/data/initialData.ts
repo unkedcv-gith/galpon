@@ -53,6 +53,7 @@ export const INITIAL_USERS: AppUser[] = [
     displayName: 'SuperAdmin Dev',
     role: 'superadmin',
     phone: '221 500-0001',
+    isActive: true,
     createdAt: new Date().toISOString(),
   },
   {
@@ -62,6 +63,7 @@ export const INITIAL_USERS: AppUser[] = [
     displayName: 'Dueño General (Admin)',
     role: 'admin',
     phone: '221 500-0002',
+    isActive: true,
     createdAt: new Date().toISOString(),
   },
   {
@@ -73,6 +75,7 @@ export const INITIAL_USERS: AppUser[] = [
     assignedBranchId: 'calle-5',
     assignedBranchName: 'El Galpón Calle 5',
     phone: '221 573-1047',
+    isActive: true,
     createdAt: new Date().toISOString(),
   },
   {
@@ -84,6 +87,7 @@ export const INITIAL_USERS: AppUser[] = [
     assignedBranchId: 'calle-13',
     assignedBranchName: 'El Galpón Calle 13',
     phone: '221 489-3221',
+    isActive: true,
     createdAt: new Date().toISOString(),
   },
 ];

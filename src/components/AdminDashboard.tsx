@@ -13,6 +13,7 @@ import {
   deleteBranch,
   getAppUsers,
   addAppUser,
+  updateAppUser,
   deleteAppUser,
   getInquiries,
   updateInquiryStatus,
@@ -46,7 +47,10 @@ import {
   User,
   RefreshCw,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  Power,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -111,7 +115,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
     setBlockedDates(getBlockedDates());
     setAppUsers(getAppUsers());
 
-    // If user is franquista, force branch filter to their assigned branch
     const user = getCurrentUser();
     setCurrentUser(user);
     if (user && user.role === 'franquista' && user.assignedBranchId) {
@@ -142,18 +145,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
   const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
   const isFranquista = currentUser?.role === 'franquista';
 
-  // Available unique months list for filtering
+  // Available unique months list
   const availableMonths = useMemo(() => {
     const monthsSet = new Set<string>();
     reservations.forEach((r) => {
       if (r.date && r.date.length >= 7) {
-        monthsSet.add(r.date.substring(0, 7)); // "YYYY-MM"
+        monthsSet.add(r.date.substring(0, 7));
       }
     });
     return Array.from(monthsSet).sort().reverse();
   }, [reservations]);
 
-  // Format YYYY-MM into Spanish string
   const formatMonthLabel = (monthKey: string) => {
     if (monthKey === 'all') return 'Todos los Meses';
     const [y, m] = monthKey.split('-');
@@ -161,27 +163,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
     return d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   };
 
-  // Filtered reservations list based on Role + Branch + Month + Status + Search
+  // Filtered reservations list
   const filteredReservations = useMemo(() => {
     return reservations.filter((r) => {
-      // 1. Branch permission filter
       if (isFranquista && currentUser?.assignedBranchId) {
         if (r.branchId !== currentUser.assignedBranchId) return false;
       } else if (selectedBranchFilter !== 'all') {
         if (r.branchId !== selectedBranchFilter) return false;
       }
 
-      // 2. Month filter
       if (selectedMonthFilter !== 'all') {
         if (!r.date.startsWith(selectedMonthFilter)) return false;
       }
 
-      // 3. Status filter
       if (filterStatus !== 'todos') {
         if (r.status !== filterStatus) return false;
       }
 
-      // 4. Text search
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matches =
@@ -294,6 +292,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
     loadData();
   };
 
+  // SuperAdmin: Toggle user active/paused status
+  const handleToggleUserActive = async (uid: string, currentStatus: boolean) => {
+    if (uid === currentUser?.uid) {
+      alert('No podés pausar tu propio usuario en sesión.');
+      return;
+    }
+    await updateAppUser(uid, { isActive: !currentStatus });
+    loadData();
+  };
+
   // SuperAdmin: Add new user
   const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,6 +316,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
       role: newUserRole,
       assignedBranchId: newUserRole === 'franquista' ? newUserBranchId : undefined,
       assignedBranchName: newUserRole === 'franquista' ? assignedBranch?.name : undefined,
+      isActive: true,
     });
 
     setNewUserName('');
@@ -317,7 +326,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
     loadData();
   };
 
-  // Analytics Metrics for the active filter
+  // Analytics Metrics
   const totalInFilter = filteredReservations.length;
   const approvedInFilter = filteredReservations.filter((r) => r.status === 'approved').length;
   const pendingInFilter = filteredReservations.filter((r) => r.status === 'pending').length;
@@ -358,7 +367,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
             
             <p className="text-[11px] text-zinc-400 font-medium">
               {isSuperAdmin 
-                ? 'Control absoluto multi-sucursal, altas de administradores y franquistas.'
+                ? 'Control total multi-sucursal, control de usuarios y habilitaciones.'
                 : isAdmin
                 ? 'Supervisión general de todas las franquicias y reservas del negocio.'
                 : `Gestión exclusiva de la sucursal: ${currentUser?.assignedBranchName || 'Asignada'}`}
@@ -369,7 +378,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
         {/* Branch Switcher & Quick Actions */}
         <div className="flex items-center gap-2.5 self-end md:self-auto">
           
-          {/* Branch Switcher (Enabled for SuperAdmin & Admin, Locked for Franquista) */}
           <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs">
             <MapPin className="w-3.5 h-3.5 text-[#1EB8BF]" />
             {isFranquista ? (
@@ -390,7 +398,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
             )}
           </div>
 
-          {/* Close & Logout buttons */}
           <button
             onClick={onCloseAdmin}
             className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-black text-white uppercase transition-colors cursor-pointer"
@@ -414,95 +421,97 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
       {/* ========================================================================= */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-        {/* NAVIGATION TABS */}
-        <div className="flex items-center gap-2 border-b-2 border-zinc-800 pb-3 overflow-x-auto">
-          
-          <button
-            onClick={() => setActiveTab('reservas')}
-            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'reservas'
-                ? 'bg-[#1EB8BF] text-black shadow-md'
-                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
-            }`}
-          >
-            <CalendarIcon className="w-4 h-4" />
-            <span>Reservas & Festejos</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-black/20 text-current">
-              {filteredReservations.length}
-            </span>
-          </button>
+        {/* CLEAN RESPONSIVE SEGMENTED BUTTON GRID (NO HORIZONTAL SCROLL) */}
+        <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
+            
+            <button
+              onClick={() => setActiveTab('reservas')}
+              className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'reservas'
+                  ? 'bg-[#1EB8BF] text-black shadow-md'
+                  : 'bg-black/40 text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              <CalendarIcon className="w-4 h-4 shrink-0" />
+              <span className="truncate">Reservas</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-black/20 text-current">
+                {filteredReservations.length}
+              </span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('consultas')}
-            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'consultas'
-                ? 'bg-[#F2C700] text-black shadow-md'
-                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
-            }`}
-          >
-            <MessageCircle className="w-4 h-4" />
-            <span>Consultas Web</span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-black/20 text-current">
-              {filteredInquiries.length}
-            </span>
-          </button>
+            <button
+              onClick={() => setActiveTab('consultas')}
+              className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'consultas'
+                  ? 'bg-[#F2C700] text-black shadow-md'
+                  : 'bg-black/40 text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              <MessageCircle className="w-4 h-4 shrink-0" />
+              <span className="truncate">Consultas</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-black/20 text-current">
+                {filteredInquiries.length}
+              </span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('bloqueo')}
-            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'bloqueo'
-                ? 'bg-[#ED3078] text-white shadow-md'
-                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
-            }`}
-          >
-            <Lock className="w-4 h-4" />
-            <span>Bloqueo de Fechas</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('bloqueo')}
+              className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'bloqueo'
+                  ? 'bg-[#ED3078] text-white shadow-md'
+                  : 'bg-black/40 text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              <Lock className="w-4 h-4 shrink-0" />
+              <span className="truncate">Bloqueos</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab('nueva')}
-            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === 'nueva'
-                ? 'bg-[#A3BA13] text-black shadow-md'
-                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
-            }`}
-          >
-            <Plus className="w-4 h-4" />
-            <span>Cargar Reserva Manual</span>
-          </button>
+            <button
+              onClick={() => setActiveTab('nueva')}
+              className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                activeTab === 'nueva'
+                  ? 'bg-[#A3BA13] text-black shadow-md'
+                  : 'bg-black/40 text-zinc-300 hover:bg-zinc-800'
+              }`}
+            >
+              <Plus className="w-4 h-4 shrink-0" />
+              <span className="truncate">Carga Manual</span>
+            </button>
 
-          {/* SUPERADMIN EXCLUSIVE TABS */}
-          {isSuperAdmin && (
-            <>
-              <button
-                onClick={() => setActiveTab('sucursales')}
-                className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-                  activeTab === 'sucursales'
-                    ? 'bg-[#ED3078] text-white shadow-md'
-                    : 'bg-zinc-900 border border-[#ED3078]/40 text-[#ED3078] hover:bg-[#ED3078]/10'
-                }`}
-              >
-                <Store className="w-4 h-4" />
-                <span>Gestión de Franquicias</span>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white">
-                  {branches.length}
-                </span>
-              </button>
+            {/* SUPERADMIN BUTTONS */}
+            {isSuperAdmin && (
+              <>
+                <button
+                  onClick={() => setActiveTab('sucursales')}
+                  className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeTab === 'sucursales'
+                      ? 'bg-[#ED3078] text-white shadow-md'
+                      : 'bg-black/40 border border-[#ED3078]/40 text-[#ED3078] hover:bg-[#ED3078]/10'
+                  }`}
+                >
+                  <Store className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Franquicias</span>
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-black bg-white/20 text-white">
+                    {branches.length}
+                  </span>
+                </button>
 
-              <button
-                onClick={() => setActiveTab('usuarios')}
-                className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-                  activeTab === 'usuarios'
-                    ? 'bg-[#F2C700] text-black shadow-md'
-                    : 'bg-zinc-900 border border-[#F2C700]/40 text-[#F2C700] hover:bg-[#F2C700]/10'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Usuarios & Permisos</span>
-              </button>
-            </>
-          )}
+                <button
+                  onClick={() => setActiveTab('usuarios')}
+                  className={`p-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeTab === 'usuarios'
+                      ? 'bg-[#F2C700] text-black shadow-md'
+                      : 'bg-black/40 border border-[#F2C700]/40 text-[#F2C700] hover:bg-[#F2C700]/10'
+                  }`}
+                >
+                  <Users className="w-4 h-4 shrink-0" />
+                  <span className="truncate">Usuarios</span>
+                </button>
+              </>
+            )}
 
+          </div>
         </div>
 
         {/* ========================================================================= */}
@@ -548,7 +557,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
 
               {/* Metric Cards Row */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                
                 <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 space-y-1">
                   <span className="text-[11px] font-bold text-zinc-400 uppercase block">Total Reservas</span>
                   <div className="font-heading font-black text-2xl text-white flex items-center justify-between">
@@ -580,7 +588,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                     <DollarSign className="w-5 h-5" />
                   </div>
                 </div>
-
               </div>
 
             </div>
@@ -641,7 +648,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                           : 'border-zinc-800'
                       }`}
                     >
-                      {/* Left: Booking Details */}
                       <div className="space-y-2 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-200 text-xs font-black uppercase flex items-center gap-1">
@@ -677,7 +683,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                         )}
                       </div>
 
-                      {/* Right: Actions */}
                       <div className="flex flex-wrap md:flex-col items-center md:items-end gap-2 shrink-0 border-t md:border-t-0 border-zinc-800 pt-3 md:pt-0">
                         <div className="flex items-center gap-1.5">
                           {isPending && (
@@ -710,7 +715,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                           </button>
                         </div>
 
-                        {/* WhatsApp Parent Button */}
                         <a
                           href={`https://wa.me/${res.parentPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
                             `¡Hola ${res.parentName}! Nos comunicamos desde ${res.branchName} por la reserva del cumple de ${res.childName} el ${res.date}.`
@@ -788,7 +792,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
         {/* ========================================================================= */}
         {activeTab === 'bloqueo' && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-4">
               <h3 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
                 <Lock className="w-5 h-5 text-[#ED3078]" /> Bloquear Día
@@ -864,7 +867,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                 </div>
               )}
             </div>
-
           </div>
         )}
 
@@ -1115,7 +1117,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 6 (SUPERADMIN): GESTIÓN DE USUARIOS Y ROLES                           */}
+        {/* TAB 6 (SUPERADMIN): GESTIÓN DE USUARIOS Y CONTROL DE ACCESO              */}
         {/* ========================================================================= */}
         {isSuperAdmin && activeTab === 'usuarios' && (
           <div className="space-y-6">
@@ -1123,9 +1125,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
             <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
               <div>
                 <h2 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
-                  <Users className="w-5 h-5 text-[#F2C700]" /> Gestión de Usuarios y Roles (4 Niveles)
+                  <Users className="w-5 h-5 text-[#F2C700]" /> Control y Gestión de Usuarios
                 </h2>
-                <p className="text-xs text-zinc-400">Alta y asignación de permisos para Admins y Franquistas</p>
+                <p className="text-xs text-zinc-400">Pausa, inhabilita o activa accesos para Admins y Franquistas</p>
               </div>
 
               <button
@@ -1214,29 +1216,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
               </form>
             )}
 
-            {/* Users List */}
+            {/* Users List with Active/Paused Toggle */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {appUsers.map((u) => (
-                <div key={u.uid} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-heading font-black text-base text-white">{u.displayName}</span>
-                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                      u.role === 'superadmin' 
-                        ? 'bg-[#ED3078] text-white' 
-                        : u.role === 'admin' 
-                        ? 'bg-[#F2C700] text-black' 
-                        : 'bg-[#1EB8BF] text-black'
-                    }`}>
-                      {u.role}
-                    </span>
-                  </div>
+              {appUsers.map((u) => {
+                const isUserActive = u.isActive !== false;
+                const isSelf = u.uid === currentUser?.uid;
 
-                  <p className="text-xs text-zinc-400">Usuario: <strong className="text-zinc-200">{u.username}</strong> • Email: {u.email}</p>
-                  {u.assignedBranchName && (
-                    <p className="text-xs text-[#1EB8BF] font-bold">Sucursal Asignada: {u.assignedBranchName}</p>
-                  )}
-                </div>
-              ))}
+                return (
+                  <div key={u.uid} className={`bg-zinc-900 border-2 rounded-3xl p-5 space-y-3 transition-all ${
+                    isUserActive ? 'border-zinc-800' : 'border-[#ED3078]/60 bg-red-950/20'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <User className="w-5 h-5 text-zinc-400" />
+                        <div>
+                          <span className="font-heading font-black text-base text-white block">{u.displayName}</span>
+                          <span className="text-[11px] text-zinc-400 font-mono">@{u.username}</span>
+                        </div>
+                      </div>
+
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        u.role === 'superadmin' 
+                          ? 'bg-[#ED3078] text-white' 
+                          : u.role === 'admin' 
+                          ? 'bg-[#F2C700] text-black' 
+                          : 'bg-[#1EB8BF] text-black'
+                      }`}>
+                        {u.role}
+                      </span>
+                    </div>
+
+                    <div className="text-xs text-zinc-400 space-y-1">
+                      <p>Email: <strong className="text-zinc-200">{u.email}</strong></p>
+                      {u.assignedBranchName && (
+                        <p className="text-[#1EB8BF] font-bold">Sucursal Asignada: {u.assignedBranchName}</p>
+                      )}
+                    </div>
+
+                    {/* SuperAdmin Action Bar: Pause / Inhabilitar */}
+                    <div className="pt-3 border-t border-zinc-800 flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full ${isUserActive ? 'bg-[#A3BA13]' : 'bg-[#ED3078]'}`} />
+                        <span className={`text-[11px] font-black uppercase ${isUserActive ? 'text-[#A3BA13]' : 'text-[#ED3078]'}`}>
+                          {isUserActive ? 'Habilitado / Activo' : 'Pausado / Inhabilitado'}
+                        </span>
+                      </div>
+
+                      {!isSelf ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleUserActive(u.uid, isUserActive)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase flex items-center gap-1.5 transition-all cursor-pointer ${
+                            isUserActive
+                              ? 'bg-zinc-800 hover:bg-[#ED3078] text-zinc-300 hover:text-white border border-zinc-700'
+                              : 'bg-[#A3BA13] hover:bg-[#8ea210] text-black shadow-md'
+                          }`}
+                        >
+                          {isUserActive ? (
+                            <>
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>Pausar</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>Reactivar</span>
+                            </>
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-zinc-500 font-bold uppercase">(Tu usuario)</span>
+                      )}
+                    </div>
+
+                  </div>
+                );
+              })}
             </div>
 
           </div>

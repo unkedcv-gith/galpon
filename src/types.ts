@@ -26,6 +26,7 @@ export interface AppUser {
   assignedBranchId?: string; // required if role === 'franquista'
   assignedBranchName?: string;
   phone?: string;
+  isActive: boolean;
   createdAt: string;
 }
 

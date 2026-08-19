@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Shield, Lock, User, Sparkles, Building2, Crown, Store } from 'lucide-react';
+import { X, Shield, Lock, User, Sparkles, Building2, Crown, Store, Eye, EyeOff } from 'lucide-react';
 import { setCurrentUser, getAppUsers } from '../services/storage';
 import { AppUser } from '../types';
 
@@ -12,6 +12,7 @@ interface AdminLoginModalProps {
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClose, onSuccess }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -31,13 +32,16 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
     const cleanUser = username.trim().toLowerCase();
     const allUsers = getAppUsers();
 
-    // Check credentials matching
     const matched = allUsers.find(
       (u) => u.username.toLowerCase() === cleanUser || u.email.toLowerCase() === cleanUser
     );
 
     if (matched) {
-      // Validate passwords
+      if (matched.isActive === false) {
+        setError('Este usuario ha sido inhabilitado/pausado por el SuperAdmin.');
+        return;
+      }
+
       let isValidPass = false;
       if (matched.role === 'superadmin' && (password === 'superadmin2026' || password === 'superadmin')) isValidPass = true;
       else if (matched.role === 'admin' && (password === 'admin2026' || password === 'galpon2026' || password === 'admin')) isValidPass = true;
@@ -53,7 +57,6 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
       }
     }
 
-    // Default fallback check
     if (cleanUser === 'admin' && (password === 'galpon2026' || password === 'admin2026')) {
       const defaultAdmin: AppUser = allUsers.find(u => u.role === 'admin') || {
         uid: 'user_admin',
@@ -61,8 +64,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
         username: 'admin',
         displayName: 'Dueño General (Admin)',
         role: 'admin',
+        isActive: true,
         createdAt: new Date().toISOString(),
       };
+      if (defaultAdmin.isActive === false) {
+        setError('Este usuario ha sido inhabilitado/pausado.');
+        return;
+      }
       setCurrentUser(defaultAdmin);
       setError('');
       onSuccess(defaultAdmin);
@@ -77,6 +85,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
         username: 'superadmin',
         displayName: 'SuperAdmin Dev',
         role: 'superadmin',
+        isActive: true,
         createdAt: new Date().toISOString(),
       };
       setCurrentUser(defaultSuper);
@@ -86,7 +95,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
       return;
     }
 
-    setError('Credenciales incorrectas. Puedes usar los accesos directos por rol abajo.');
+    setError('Credenciales incorrectas. Podés usar los accesos directos por rol abajo.');
   };
 
   const handleQuickRoleAccess = (role: 'superadmin' | 'admin' | 'franquista5' | 'franquista13') => {
@@ -104,6 +113,10 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
     }
 
     if (selectedUser) {
+      if (selectedUser.isActive === false) {
+        setError(`El usuario "${selectedUser.displayName}" está inhabilitado/pausado por el SuperAdmin.`);
+        return;
+      }
       setCurrentUser(selectedUser);
       setError('');
       onSuccess(selectedUser);
@@ -131,7 +144,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
 
         <div className="p-6 space-y-5">
           <p className="text-xs text-zinc-300 font-medium">
-            Acceso con sistema de roles para SuperAdmin (Desarrollador), Admin (Dueño de negocio) y Franquistas de cada sucursal.
+            Acceso con sistema de roles para SuperAdmin (Desarrollador), Admin (Dueño de negocio) y Franquistas.
           </p>
 
           <form onSubmit={handleLogin} className="space-y-4">
@@ -153,14 +166,24 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
               <label className="text-xs font-black text-white uppercase flex items-center gap-1.5">
                 <Lock className="w-3.5 h-3.5 text-[#ED3078]" /> Contraseña
               </label>
-              <input
-                type="password"
-                required
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#ED3078] focus:outline-none"
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl pl-3.5 pr-10 py-2.5 text-xs font-medium text-white focus:border-[#ED3078] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  title={showPassword ? 'Ocultar contraseña' : 'Ver contraseña'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4 text-[#1EB8BF]" />}
+                </button>
+              </div>
             </div>
 
             {error && (
@@ -177,7 +200,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({ isOpen, onClos
             </button>
           </form>
 
-          {/* Quick Role Selectors for testing and instant access */}
+          {/* Quick Role Selectors for testing */}
           <div className="pt-4 border-t-2 border-zinc-800 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-black text-zinc-400 uppercase tracking-wider">

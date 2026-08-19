@@ -185,6 +185,17 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
 
       setSubmittedReservation(newRes);
       if (onReservationCreated) onReservationCreated();
+
+      // Smoothly scroll to the confirmation receipt view
+      setTimeout(() => {
+        const target = document.getElementById('reservar');
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+    } catch (err) {
+      console.error('Error creating reservation:', err);
+      alert('Ocurrió un error al procesar tu solicitud. Por favor intenta nuevamente.');
     } finally {
       setIsSubmitting(false);
     }
