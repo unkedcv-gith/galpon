@@ -1,24 +1,43 @@
-import React, { useState, useMemo } from 'react';
-import { Reservation } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Reservation, Branch } from '../types';
 import { TIME_SLOTS, BRAND_INFO } from '../data/initialData';
-import { getReservations, getBlockedDates, addReservation } from '../services/storage';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, CheckCircle2, MessageCircle, User, Phone, Mail, Send, Gift } from 'lucide-react';
+import { getReservations, getBlockedDates, addReservation, getBranches } from '../services/storage';
+import { 
+  Calendar as CalendarIcon, 
+  ChevronLeft, 
+  ChevronRight, 
+  CheckCircle2, 
+  MessageCircle, 
+  User, 
+  Phone, 
+  Mail, 
+  Send, 
+  Gift, 
+  MapPin, 
+  Clock, 
+  Sparkles,
+  ArrowRight,
+  RefreshCw,
+  Info
+} from 'lucide-react';
 
 interface BookingCalendarProps {
   isOpenModal?: boolean;
   onCloseModal?: () => void;
   onReservationCreated?: () => void;
+  preselectedBranchId?: string;
 }
 
 export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   onReservationCreated,
+  preselectedBranchId,
 }) => {
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(preselectedBranchId || '');
+
+  // Calendar State
   const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [selectedDateStr, setSelectedDateStr] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2); // Default to 2 days ahead
-    return d.toISOString().split('T')[0];
-  });
+  const [selectedDateStr, setSelectedDateStr] = useState<string>('');
   const [selectedSlotId, setSelectedSlotId] = useState<string>('');
 
   // Form State
@@ -35,6 +54,19 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
   const [submittedReservation, setSubmittedReservation] = useState<Reservation | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Load active branches
+  useEffect(() => {
+    const loadedBranches = getBranches().filter(b => b.isActive);
+    setBranches(loadedBranches);
+    if (!selectedBranchId && loadedBranches.length > 0) {
+      setSelectedBranchId(loadedBranches[0].id);
+    }
+  }, []);
+
+  const selectedBranch = useMemo(() => {
+    return branches.find(b => b.id === selectedBranchId) || branches[0] || null;
+  }, [branches, selectedBranchId]);
+
   // Sync kids with package selection
   const handleKidsCountChange = (count: number) => {
     setEstimatedKids(count);
@@ -47,39 +79,43 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     }
   };
 
-  // Get current bookings & blocked dates from localStorage
-  const reservations = useMemo(() => getReservations(), [submittedReservation]);
-  const blockedDates = useMemo(() => getBlockedDates(), []);
+  // Get current bookings & blocked dates for the selected branch
+  const reservations = useMemo(() => {
+    return getReservations(selectedBranchId);
+  }, [selectedBranchId, submittedReservation]);
+
+  const blockedDates = useMemo(() => {
+    return getBlockedDates(selectedBranchId);
+  }, [selectedBranchId]);
 
   // Calendar calculations
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
-
   const monthName = currentDate.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
 
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDayIndex = new Date(year, month, 1).getDay(); // 0 = Sunday
 
-  // Get status for a given YYYY-MM-DD
-  const getDayStatus = (dateStr: string) => {
-    const isBlocked = blockedDates.some((b) => b.date === dateStr);
-    if (isBlocked) return 'blocked';
-
-    const dayBookings = reservations.filter(
-      (r) => r.date === dateStr && (r.status === 'approved' || r.status === 'pending')
-    );
-
-    if (dayBookings.length >= 3) return 'full';
-    if (dayBookings.length > 0) return 'partial';
-    return 'available';
+  // Check if a date is in the past
+  const isPastDate = (dayNumber: number) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dateToCheck = new Date(year, month, dayNumber);
+    return dateToCheck < today;
   };
 
-  // Slots availability for selectedDateStr
+  // Slots availability for selectedDateStr in selectedBranch
   const activeBookingsForSelectedDate = useMemo(() => {
+    if (!selectedDateStr) return [];
     return reservations.filter(
       (r) => r.date === selectedDateStr && (r.status === 'approved' || r.status === 'pending')
     );
   }, [reservations, selectedDateStr]);
+
+  const isDateBlocked = useMemo(() => {
+    if (!selectedDateStr) return false;
+    return blockedDates.some((b) => b.date === selectedDateStr);
+  }, [blockedDates, selectedDateStr]);
 
   const isSlotBooked = (slotId: string) => {
     return activeBookingsForSelectedDate.some((r) => r.slotId === slotId);
@@ -95,15 +131,34 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     setCurrentDate(newDate);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleDateClick = (dayNumber: number) => {
+    if (isPastDate(dayNumber)) return;
+    const formattedMonth = String(month + 1).padStart(2, '0');
+    const formattedDay = String(dayNumber).padStart(2, '0');
+    const dateString = `${year}-${formattedMonth}-${formattedDay}`;
+    setSelectedDateStr(dateString);
+    setSelectedSlotId(''); // Reset slot on date change
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedBranch) {
+      alert('Por favor seleccioná la sucursal donde querés realizar el festejo.');
+      return;
+    }
+
+    if (!selectedDateStr) {
+      alert('Por favor hacé clic en un día del calendario para seleccionar la fecha.');
+      return;
+    }
+
     if (!selectedSlotId) {
       alert('Por favor elegí un turno horario disponible (Mañana, Tarde Temprano o Tarde/Noche).');
       return;
     }
 
     if (!parentName || !parentPhone || !childName) {
-      alert('Por favor completá los campos obligatorios: Tu Nombre, WhatsApp y Nombre del Cumpleañero/a.');
+      alert('Por favor completá los campos obligatorios: Tu Nombre, WhatsApp y Nombre del Cumpleañer@.');
       return;
     }
 
@@ -111,7 +166,9 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     setIsSubmitting(true);
 
     try {
-      const newRes = addReservation({
+      const newRes = await addReservation({
+        branchId: selectedBranch.id,
+        branchName: selectedBranch.name,
         date: selectedDateStr,
         slotId: selectedSlotId,
         slotTime: slotObj?.timeRange || '15:00 a 17:30 hs',
@@ -133,399 +190,534 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     }
   };
 
+  const handleResetForm = () => {
+    setSubmittedReservation(null);
+    setSelectedSlotId('');
+    setSelectedDateStr('');
+    setParentName('');
+    setParentPhone('');
+    setParentEmail('');
+    setChildName('');
+    setChildAge(6);
+    setEstimatedKids(20);
+    setNotes('');
+  };
+
+  const selectedDateFormatted = useMemo(() => {
+    if (!selectedDateStr) return '';
+    const [y, m, d] = selectedDateStr.split('-');
+    const date = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+    return date.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  }, [selectedDateStr]);
+
   return (
-    <section id="reservar" className="w-full bg-gradient-to-b from-[#1EB8BF] via-[#1EB8BF] via-45% to-black text-white py-16 sm:py-24 transition-colors">
+    <section id="reservar" className="w-full bg-gradient-to-b from-[#1EB8BF] via-[#1EB8BF] via-45% to-black text-white py-14 sm:py-20 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6 sm:space-y-8">
         
         {/* Header Bento Box */}
-        <div className="bg-black/60 backdrop-blur-md rounded-3xl border-2 border-white/20 p-6 sm:p-10 text-center space-y-3 shadow-2xl text-white">
+        <div className="bg-black/75 backdrop-blur-md rounded-3xl border-2 border-white/20 p-6 sm:p-10 text-center space-y-3 shadow-2xl text-white">
           <span className="inline-block px-4 py-1.5 rounded-full bg-[#1EB8BF] text-black font-heading font-black text-xs tracking-widest uppercase shadow-md">
-            Almanaque Interactivo
+            Almanaque & Reservas
           </span>
           <h2 className="font-heading text-3xl sm:text-4xl lg:text-5xl font-black text-white">
-            Reservá tu <span className="text-[#F2C700] drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">Fecha y Turno</span>
+            Reservá tu <span className="text-[#F2C700] drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">Fecha y Sucursal</span>
           </h2>
           <p className="text-zinc-200 text-sm sm:text-base font-medium max-w-2xl mx-auto leading-relaxed">
-            Consultá disponibilidad en tiempo real, seleccioná el horario conveniente y solicitá la reserva para congelar la tarifa con tu seña.
+            Elegí tu sucursal de El Galpón, seleccioná el día en el calendario para consultar turnos disponibles y solicitá tu reserva para congelar tarifa.
           </p>
         </div>
 
         {submittedReservation ? (
           /* Confirmation Receipt View */
-          <div className="max-w-2xl mx-auto bg-black/60 backdrop-blur-md border-2 border-white/20 rounded-3xl p-6 sm:p-8 space-y-6 text-center shadow-2xl text-white">
-            <div className="w-16 h-16 rounded-2xl bg-zinc-950/60 border border-[#A3BA13] text-[#A3BA13] flex items-center justify-center mx-auto shadow-xs">
+          <div className="max-w-2xl mx-auto bg-black/85 backdrop-blur-md border-2 border-white/20 rounded-3xl p-6 sm:p-8 space-y-6 text-center shadow-2xl text-white">
+            <div className="w-16 h-16 rounded-2xl bg-zinc-950 border border-[#A3BA13] text-[#A3BA13] flex items-center justify-center mx-auto shadow-md">
               <CheckCircle2 className="w-10 h-10" />
             </div>
 
             <div className="space-y-2">
+              <span className="inline-block px-3 py-1 bg-[#1EB8BF]/20 text-[#1EB8BF] border border-[#1EB8BF] rounded-full text-xs font-black uppercase">
+                {submittedReservation.branchName}
+              </span>
               <h3 className="font-heading text-2xl sm:text-3xl font-black text-white uppercase">
                 ¡Solicitud de Reserva Registrada!
               </h3>
-              <p className="text-zinc-200 text-sm font-medium">
-                Hemos recibido tu pedido para el festejo de <strong className="text-[#ED3078]">{submittedReservation.childName}</strong>.
+              <p className="text-xs sm:text-sm text-zinc-300">
+                Tu solicitud de turno para el cumple de <strong className="text-[#F2C700]">{submittedReservation.childName}</strong> ya fue ingresada con éxito.
               </p>
             </div>
 
-            <div className="bg-zinc-950/60 rounded-2xl p-5 border border-white/20 text-left space-y-3 text-xs sm:text-sm font-medium text-white shadow-inner">
-              <div className="flex justify-between border-b border-white/15 pb-2">
-                <span className="text-zinc-400">Código de Reserva:</span>
-                <span className="font-mono text-[#F2C700] font-black">{submittedReservation.id}</span>
-              </div>
-              <div className="flex justify-between border-b border-white/15 pb-2">
-                <span className="text-zinc-400">Fecha Solicitada:</span>
-                <span className="font-bold">{submittedReservation.date}</span>
-              </div>
-              <div className="flex justify-between border-b border-white/15 pb-2">
-                <span className="text-zinc-400">Turno Elegido:</span>
-                <span className="text-[#ED3078] font-bold">{submittedReservation.slotTime}</span>
-              </div>
-              <div className="flex justify-between border-b border-white/15 pb-2">
-                <span className="text-zinc-400">Adulto Responsable:</span>
-                <span>{submittedReservation.parentName} ({submittedReservation.parentPhone})</span>
-              </div>
-              <div className="flex justify-between border-b border-white/15 pb-2">
-                <span className="text-zinc-400">Paquete Invitados:</span>
-                <span className="text-[#1EB8BF] font-bold">
-                  {submittedReservation.estimatedKids} chicos ({submittedReservation.additionalPackage === 'base_20' ? 'Contrato Base 20' : submittedReservation.additionalPackage === 'adicional_21_28' ? 'Adicional 21-28' : 'Adicional 29-35'})
+            {/* Voucher Details */}
+            <div className="bg-zinc-950/80 border-2 border-zinc-800 rounded-2xl p-5 text-left space-y-3 font-sans text-xs sm:text-sm">
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
+                <span className="text-zinc-400 font-bold uppercase">Sucursal:</span>
+                <span className="text-white font-extrabold flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-[#1EB8BF]" /> {submittedReservation.branchName}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-400">Estado Inicial:</span>
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#F2C700] text-black uppercase">
-                  Pendiente de aprobación de seña
-                </span>
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
+                <span className="text-zinc-400 font-bold uppercase">Fecha Solicitada:</span>
+                <span className="text-white font-extrabold">{submittedReservation.date}</span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
+                <span className="text-zinc-400 font-bold uppercase">Horario del Turno:</span>
+                <span className="text-[#F2C700] font-black">{submittedReservation.slotTime}</span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
+                <span className="text-zinc-400 font-bold uppercase">Adulto Responsable:</span>
+                <span className="text-white font-medium">{submittedReservation.parentName} ({submittedReservation.parentPhone})</span>
+              </div>
+              <div className="flex justify-between border-b border-zinc-800 pb-2">
+                <span className="text-zinc-400 font-bold uppercase">Invitados Estimados:</span>
+                <span className="text-white font-medium">{submittedReservation.estimatedKids} chicos</span>
+              </div>
+              <div className="flex justify-between pt-1">
+                <span className="text-zinc-400 font-bold uppercase">Estado:</span>
+                <span className="text-[#ED3078] font-black uppercase tracking-wider">Pendiente de Seña</span>
               </div>
             </div>
 
-            <div className="space-y-3 pt-1">
-              <p className="text-xs text-zinc-200 font-medium">
-                Para congelar la tarifa y confirmar definitivamente el turno, enviá tu comprobante de seña por WhatsApp a la administración:
-              </p>
-
+            {/* Direct WhatsApp Confirmation Button */}
+            <div className="space-y-3 pt-2">
               <a
-                href={`${BRAND_INFO.whatsappUrl}?text=${encodeURIComponent(`Hola El Galpón! Acabo de hacer la reserva #${submittedReservation.id} para el festejo de ${submittedReservation.childName} el día ${submittedReservation.date} (${submittedReservation.slotTime}). Quisiera enviar la seña.`)}`}
+                href={`https://wa.me/${selectedBranch?.whatsappNumber || '5492215731047'}?text=${encodeURIComponent(
+                  `¡Hola ${submittedReservation.branchName}! Acabo de generar una solicitud de reserva web para el cumpleaños de ${submittedReservation.childName} el día ${submittedReservation.date} en el turno ${submittedReservation.slotTime}. Mi nombre es ${submittedReservation.parentName}. ¿Cómo coordinamos el pago de la seña?`
+                )}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full bg-[#1EB8BF] hover:bg-[#19a1a7] text-black font-black text-xs uppercase tracking-wider py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
+                className="w-full bg-[#25D366] hover:bg-[#20bd5a] text-black font-heading font-black text-sm uppercase py-4 px-6 rounded-2xl flex items-center justify-center gap-2 shadow-[0_0_25px_rgba(37,211,102,0.4)] transition-all cursor-pointer"
               >
                 <MessageCircle className="w-5 h-5 text-black" />
-                <span>Confirmar Seña por WhatsApp</span>
+                <span>Confirmar y Enviar Seña por WhatsApp</span>
               </a>
 
               <button
-                onClick={() => setSubmittedReservation(null)}
-                className="text-xs text-zinc-300 hover:text-white font-bold underline pt-2 cursor-pointer"
+                onClick={handleResetForm}
+                className="w-full py-3 text-xs font-bold text-zinc-400 hover:text-white uppercase tracking-wider transition-colors cursor-pointer"
               >
-                Hacer otra reserva o modificar datos
+                ← Realizar otra consulta o reserva
               </button>
             </div>
           </div>
         ) : (
-          /* Main Calendar + Form Grid */
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          /* Normal Interactive Booking Workflow */
+          <div className="space-y-8">
             
-            {/* Calendar Widget Column */}
-            <div className="lg:col-span-5 bg-black/60 backdrop-blur-md border-2 border-white/20 rounded-3xl p-6 space-y-5 shadow-2xl text-white">
-              
-              {/* Month Navigation */}
-              <div className="flex items-center justify-between border-b border-white/20 pb-3">
-                <h3 className="font-heading text-lg font-black text-white capitalize flex items-center gap-2 uppercase">
-                  <CalendarIcon className="w-5 h-5 text-[#1EB8BF]" />
-                  {monthName}
-                </h3>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => handleMonthChange('prev')}
-                    className="p-2 rounded-xl bg-zinc-950/60 border border-white/20 text-white hover:bg-zinc-900 font-bold cursor-pointer transition-colors"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleMonthChange('next')}
-                    className="p-2 rounded-xl bg-zinc-950/60 border border-white/20 text-white hover:bg-zinc-900 font-bold cursor-pointer transition-colors"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+            {/* ========================================================================= */}
+            {/* STEP 1: MANDATORY BRANCH / SUCURSAL SELECTOR                              */}
+            {/* ========================================================================= */}
+            <div className="bg-black/80 backdrop-blur-md rounded-3xl border-2 border-white/20 p-5 sm:p-8 space-y-4 shadow-xl">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-[#1EB8BF] text-black font-black text-sm flex items-center justify-center shrink-0">
+                    1
+                  </div>
+                  <div>
+                    <h3 className="font-heading text-lg sm:text-xl font-black text-white uppercase">
+                      Paso 1: Seleccioná la Sucursal
+                    </h3>
+                    <p className="text-xs text-zinc-300 font-medium">
+                      Elige el local donde deseas celebrar el cumpleaños infantil
+                    </p>
+                  </div>
                 </div>
+
+                {selectedBranch && (
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/10 rounded-full text-xs font-bold text-zinc-300 self-start sm:self-auto">
+                    <MapPin className="w-3.5 h-3.5 text-[#1EB8BF]" />
+                    <span>Sucursal seleccionada: <strong className="text-white">{selectedBranch.name}</strong></span>
+                  </div>
+                )}
               </div>
 
-              {/* Day Name Headers */}
-              <div className="grid grid-cols-7 text-center text-xs font-black text-[#1EB8BF] uppercase tracking-wider">
-                <span>Do</span><span>Lu</span><span>Ma</span><span>Mi</span><span>Ju</span><span>Vi</span><span>Sá</span>
-              </div>
-
-              {/* Calendar Days Grid */}
-              <div className="grid grid-cols-7 gap-1.5 text-center text-sm font-bold">
-                {/* Empty offset padding */}
-                {Array.from({ length: firstDayIndex }).map((_, i) => (
-                  <div key={`empty-${i}`} className="p-2" />
-                ))}
-
-                {/* Days of Month */}
-                {Array.from({ length: daysInMonth }).map((_, i) => {
-                  const dayNum = i + 1;
-                  const dStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-                  const status = getDayStatus(dStr);
-                  const isSelected = selectedDateStr === dStr;
-
-                  const todayStr = new Date().toISOString().split('T')[0];
-                  const isPast = dStr < todayStr;
-
-                  let fileteColor = 'border-2 border-[#A3BA13] text-white hover:bg-zinc-900';
-                  if (status === 'partial') fileteColor = 'border-2 border-[#1EB8BF] text-white hover:bg-zinc-900';
-                  if (status === 'full' || status === 'blocked') fileteColor = 'border-2 border-[#ED3078] text-[#ED3078]';
-
+              {/* Branch Selector Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4 pt-1">
+                {branches.map((branch) => {
+                  const isSelected = selectedBranchId === branch.id;
                   return (
                     <button
-                      key={dStr}
-                      disabled={isPast || status === 'blocked'}
+                      key={branch.id}
+                      type="button"
                       onClick={() => {
-                        setSelectedDateStr(dStr);
+                        setSelectedBranchId(branch.id);
+                        setSelectedSlotId(''); // Reset slot on branch change
                       }}
-                      className={`relative p-2 rounded-xl flex flex-col items-center justify-center transition-all cursor-pointer ${
-                        isPast
-                          ? 'opacity-20 cursor-not-allowed bg-zinc-950 border border-zinc-900 text-zinc-600'
-                          : status === 'blocked'
-                          ? 'opacity-40 cursor-not-allowed bg-zinc-950 border-2 border-[#ED3078] text-[#ED3078]'
-                          : isSelected
-                          ? 'bg-[#1EB8BF] text-black font-black scale-105 border-2 border-white shadow-lg'
-                          : `bg-zinc-950 ${fileteColor}`
+                      className={`relative p-5 rounded-2xl border-2 text-left transition-all duration-300 cursor-pointer flex items-start gap-4 ${
+                        isSelected
+                          ? 'bg-zinc-900/90 border-[#1EB8BF] shadow-[0_0_25px_rgba(30,184,191,0.35)] scale-[1.01]'
+                          : 'bg-black/60 border-white/15 hover:border-white/40 hover:bg-zinc-900/40'
                       }`}
                     >
-                      <span className="font-heading">{dayNum}</span>
+                      <div 
+                        className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-md ${
+                          isSelected ? 'bg-[#1EB8BF] text-black' : 'bg-zinc-800 text-zinc-300'
+                        }`}
+                      >
+                        <MapPin className="w-6 h-6" />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="font-heading font-black text-base sm:text-lg text-white uppercase truncate">
+                            {branch.name}
+                          </h4>
+                          {isSelected && (
+                            <span className="shrink-0 px-2 py-0.5 rounded-full bg-[#1EB8BF] text-black text-[10px] font-black uppercase">
+                              Activa
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-zinc-300 font-medium flex items-center gap-1 mt-1">
+                          <MapPin className="w-3 h-3 text-[#ED3078]" /> {branch.address}, {branch.city}
+                        </p>
+                        <p className="text-[11px] text-zinc-400 font-medium flex items-center gap-1 mt-0.5">
+                          <Phone className="w-3 h-3 text-[#A3BA13]" /> Tel: {branch.phone}
+                        </p>
+                      </div>
                     </button>
                   );
                 })}
               </div>
+            </div>
 
-              {/* Legend */}
-              <div className="pt-2 border-t-2 border-white/20 flex items-center justify-around text-[10px] font-black text-zinc-300 uppercase">
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-md border-2 border-[#A3BA13] bg-zinc-950" /> Disponible
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-md border-2 border-[#1EB8BF] bg-zinc-950" /> Con turnos
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="w-3.5 h-3.5 rounded-md border-2 border-[#ED3078] bg-zinc-950" /> Completo
-                </span>
+            {/* ========================================================================= */}
+            {/* STEP 2: NEUTRAL MONTHLY CALENDAR & ON-DEMAND BOTTOM TIME SLOTS            */}
+            {/* ========================================================================= */}
+            <div className="bg-black/80 backdrop-blur-md rounded-3xl border-2 border-white/20 p-5 sm:p-8 space-y-6 shadow-xl">
+              
+              <div className="flex items-center gap-2.5 border-b border-white/10 pb-4">
+                <div className="w-8 h-8 rounded-xl bg-[#F2C700] text-black font-black text-sm flex items-center justify-center shrink-0">
+                  2
+                </div>
+                <div>
+                  <h3 className="font-heading text-lg sm:text-xl font-black text-white uppercase">
+                    Paso 2: Elegí una Fecha en el Almanaque
+                  </h3>
+                  <p className="text-xs text-zinc-300 font-medium">
+                    Hacé clic en cualquier día para consultar los turnos disponibles en <strong className="text-[#1EB8BF]">{selectedBranch?.name}</strong>
+                  </p>
+                </div>
               </div>
 
-              {/* Slot Picker for selected date */}
-              <div className="pt-3 border-t border-white/20 space-y-2.5">
-                <div className="text-xs font-black text-white flex items-center justify-between uppercase">
-                  <span>Turnos para el {selectedDateStr}:</span>
-                  <span className="text-black font-black text-[11px] bg-[#F2C700] px-2 py-0.5 rounded-full">2:30 hs c/u</span>
+              {/* Month Navigation & Grid */}
+              <div className="max-w-3xl mx-auto space-y-4">
+                
+                {/* Month Selector Bar */}
+                <div className="flex items-center justify-between bg-zinc-950/80 border border-white/15 rounded-2xl px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => handleMonthChange('prev')}
+                    className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white border border-white/10 transition-colors cursor-pointer"
+                    title="Mes Anterior"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  
+                  <div className="text-center">
+                    <span className="font-heading font-black text-lg sm:text-xl text-white uppercase tracking-wider">
+                      {monthName}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleMonthChange('next')}
+                    className="p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white border border-white/10 transition-colors cursor-pointer"
+                    title="Mes Siguiente"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
                 </div>
 
-                <div className="space-y-2">
-                  {TIME_SLOTS.map((slot) => {
-                    const booked = isSlotBooked(slot.id);
-                    const isSelected = selectedSlotId === slot.id;
+                {/* Day Name Header Row */}
+                <div className="grid grid-cols-7 gap-1.5 text-center text-xs font-black text-zinc-400 uppercase tracking-wider py-1">
+                  <div>Dom</div>
+                  <div>Lun</div>
+                  <div>Mar</div>
+                  <div>Mié</div>
+                  <div>Jue</div>
+                  <div>Vie</div>
+                  <div>Sáb</div>
+                </div>
+
+                {/* Calendar Days Grid (CLEAN & NEUTRAL DESIGN: All future days identical) */}
+                <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+                  {/* Empty cells before month start */}
+                  {Array.from({ length: firstDayIndex }).map((_, i) => (
+                    <div key={`empty-${i}`} className="h-11 sm:h-14 rounded-xl opacity-0 pointer-events-none" />
+                  ))}
+
+                  {/* Day Buttons */}
+                  {Array.from({ length: daysInMonth }).map((_, i) => {
+                    const dayNum = i + 1;
+                    const formattedMonth = String(month + 1).padStart(2, '0');
+                    const formattedDay = String(dayNum).padStart(2, '0');
+                    const dateStr = `${year}-${formattedMonth}-${formattedDay}`;
+                    const isPast = isPastDate(dayNum);
+                    const isSelected = selectedDateStr === dateStr;
 
                     return (
                       <button
-                        key={slot.id}
-                        disabled={booked}
+                        key={dateStr}
                         type="button"
-                        onClick={() => setSelectedSlotId(slot.id)}
-                        className={`w-full text-left p-3 rounded-xl border-2 transition-all flex items-center justify-between cursor-pointer ${
-                          booked
-                            ? 'bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed opacity-50'
+                        disabled={isPast}
+                        onClick={() => handleDateClick(dayNum)}
+                        className={`h-11 sm:h-14 rounded-xl flex flex-col items-center justify-center font-heading font-bold text-sm sm:text-base transition-all duration-200 cursor-pointer ${
+                          isPast
+                            ? 'bg-zinc-900/30 text-zinc-600 border border-transparent cursor-not-allowed'
                             : isSelected
-                            ? 'bg-[#1EB8BF] border-[#1EB8BF] text-black shadow-lg scale-[1.01]'
-                            : 'bg-zinc-950 border-white/20 text-white hover:border-[#1EB8BF] hover:bg-zinc-900'
+                            ? 'bg-[#1EB8BF] text-black font-black border-2 border-white shadow-[0_0_20px_rgba(30,184,191,0.8)] scale-105 z-10'
+                            : 'bg-zinc-900/70 hover:bg-zinc-800 text-white border border-white/10 hover:border-[#1EB8BF]/60'
                         }`}
                       >
-                        <div>
-                          <div className="font-heading font-black text-xs uppercase">{slot.title}</div>
-                          <div className={`text-[11px] font-bold ${isSelected ? 'text-black' : 'text-[#1EB8BF]'}`}>{slot.timeRange}</div>
-                        </div>
-
-                        {booked ? (
-                          <span className="text-[10px] uppercase font-black text-zinc-500 bg-zinc-950 px-2 py-0.5 rounded-md border border-zinc-800">
-                            Reservado
-                          </span>
-                        ) : isSelected ? (
-                          <span className="text-[11px] font-black text-white bg-black px-2.5 py-0.5 rounded-lg uppercase shadow-xs">
-                            Elegido
-                          </span>
-                        ) : (
-                          <span className="text-[11px] font-black text-black bg-[#A3BA13] px-2.5 py-0.5 rounded-lg uppercase">
-                            Disponible
-                          </span>
-                        )}
+                        <span>{dayNum}</span>
                       </button>
                     );
                   })}
                 </div>
+
               </div>
+
+              {/* ========================================================================= */}
+              {/* ON-DEMAND BOTTOM TIME SLOTS PANEL (Appears upon clicking a date)           */}
+              {/* ========================================================================= */}
+              {selectedDateStr ? (
+                <div className="pt-4 border-t border-white/15 animate-in fade-in slide-in-from-top-4 duration-300 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-[#F2C700]" />
+                      <h4 className="font-heading font-black text-base sm:text-lg text-white uppercase">
+                        Turnos para el <span className="text-[#F2C700] capitalize">{selectedDateFormatted}</span>
+                      </h4>
+                    </div>
+                    <span className="text-xs text-zinc-300 font-medium">
+                      Sucursal: <strong className="text-white">{selectedBranch?.name}</strong>
+                    </span>
+                  </div>
+
+                  {isDateBlocked ? (
+                    <div className="p-4 bg-zinc-950/80 border-2 border-[#ED3078] rounded-2xl text-center space-y-1">
+                      <p className="font-heading font-black text-sm text-[#ED3078] uppercase">
+                        Fecha No Disponible para Eventos
+                      </p>
+                      <p className="text-xs text-zinc-300">
+                        Esta fecha se encuentra reservada para mantenimiento o evento exclusivo en {selectedBranch?.name}. Por favor selecciona otro día en el calendario.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {TIME_SLOTS.map((slot) => {
+                        const isBooked = isSlotBooked(slot.id);
+                        const isSelected = selectedSlotId === slot.id;
+
+                        return (
+                          <button
+                            key={slot.id}
+                            type="button"
+                            disabled={isBooked}
+                            onClick={() => setSelectedSlotId(slot.id)}
+                            className={`p-4 rounded-2xl border-2 text-left transition-all duration-200 flex flex-col justify-between cursor-pointer ${
+                              isBooked
+                                ? 'bg-zinc-950/50 border-zinc-800 text-zinc-500 cursor-not-allowed opacity-60'
+                                : isSelected
+                                ? 'bg-gradient-to-br from-zinc-900 to-black border-[#F2C700] text-white shadow-[0_0_20px_rgba(242,199,0,0.35)] scale-[1.02]'
+                                : 'bg-black/60 border-white/15 text-zinc-200 hover:border-[#1EB8BF] hover:bg-zinc-900/60'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-1 mb-2">
+                              <span className="font-heading font-black text-sm uppercase">
+                                {slot.title}
+                              </span>
+                              {isBooked ? (
+                                <span className="px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-400 text-[10px] font-black uppercase">
+                                  Ocupado
+                                </span>
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                                  isSelected ? 'bg-[#F2C700] text-black' : 'bg-[#1EB8BF]/20 text-[#1EB8BF] border border-[#1EB8BF]/40'
+                                }`}>
+                                  {isSelected ? 'Seleccionado' : 'Disponible'}
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <p className={`font-black text-base ${isSelected ? 'text-[#F2C700]' : 'text-white'}`}>
+                                {slot.timeRange}
+                              </p>
+                              <p className="text-[11px] text-zinc-400 line-clamp-2">
+                                {slot.description}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                </div>
+              ) : (
+                <div className="p-4 bg-zinc-950/40 border border-white/10 rounded-2xl text-center flex items-center justify-center gap-2 text-xs text-zinc-400">
+                  <Info className="w-4 h-4 text-[#1EB8BF]" />
+                  <span>Seleccioná un día del calendario arriba para desplegar el estado y disponibilidad de los turnos.</span>
+                </div>
+              )}
 
             </div>
 
-            {/* Reservation Form Column */}
-            <div className="lg:col-span-7 bg-black/60 backdrop-blur-md border-2 border-white/20 rounded-3xl p-6 sm:p-8 space-y-5 shadow-2xl text-white">
-              <div className="flex items-center justify-between border-b border-white/20 pb-3">
-                <div>
-                  <h3 className="font-heading text-xl font-black text-white uppercase">
-                    Datos para la Reserva
-                  </h3>
-                  <p className="text-xs text-zinc-300 font-medium">
-                    Fecha elegida: <strong className="text-[#1EB8BF]">{selectedDateStr}</strong> {selectedSlotId ? `(${TIME_SLOTS.find(s=>s.id===selectedSlotId)?.timeRange})` : '• (Seleccioná un turno disponible)'}
-                  </p>
+            {/* ========================================================================= */}
+            {/* STEP 3: RESERVATION DETAILS & CONTACT FORM                                */}
+            {/* ========================================================================= */}
+            {selectedSlotId && (
+              <form 
+                onSubmit={handleSubmit}
+                className="bg-black/80 backdrop-blur-md rounded-3xl border-2 border-white/20 p-5 sm:p-8 space-y-6 shadow-xl animate-in fade-in slide-in-from-top-4 duration-300"
+              >
+                <div className="flex items-center gap-2.5 border-b border-white/10 pb-4">
+                  <div className="w-8 h-8 rounded-xl bg-[#ED3078] text-white font-black text-sm flex items-center justify-center shrink-0">
+                    3
+                  </div>
+                  <div>
+                    <h3 className="font-heading text-lg sm:text-xl font-black text-white uppercase">
+                      Paso 3: Completá los Datos del Festejo
+                    </h3>
+                    <p className="text-xs text-zinc-300 font-medium">
+                      Turno: <strong className="text-[#F2C700]">{selectedDateFormatted}</strong> ({TIME_SLOTS.find(s => s.id === selectedSlotId)?.timeRange}) en <strong className="text-[#1EB8BF]">{selectedBranch?.name}</strong>
+                    </p>
+                  </div>
                 </div>
-                <span className="px-3 py-1 bg-[#1EB8BF] text-black text-xs font-black rounded-full uppercase">
-                  Paso 2/2
-                </span>
-              </div>
 
-              <form onSubmit={handleSubmit} className="space-y-4">
-                
-                {/* Adults Contact */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1">
+                  {/* Parent Name */}
+                  <div className="space-y-1.5">
                     <label className="text-xs font-black text-white uppercase flex items-center gap-1.5">
-                      <User className="w-3.5 h-3.5 text-[#1EB8BF]" /> Nombre del Adulto *
+                      <User className="w-3.5 h-3.5 text-[#1EB8BF]" /> Tu Nombre y Apellido *
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="Ej: Laura Pérez"
+                      placeholder="Ej: Mariana Gómez"
                       value={parentName}
                       onChange={(e) => setParentName(e.target.value)}
-                      className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#1EB8BF] focus:outline-none"
+                      className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-zinc-500 focus:border-[#1EB8BF] focus:outline-none"
                     />
                   </div>
 
-                  <div className="space-y-1">
+                  {/* Parent WhatsApp */}
+                  <div className="space-y-1.5">
                     <label className="text-xs font-black text-white uppercase flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-[#A3BA13]" /> Celular / WhatsApp *
+                      <Phone className="w-3.5 h-3.5 text-[#25D366]" /> Tu Celular / WhatsApp *
                     </label>
                     <input
                       type="tel"
                       required
-                      placeholder="Ej: 221 1234567"
+                      placeholder="Ej: 221 456-7890"
                       value={parentPhone}
                       onChange={(e) => setParentPhone(e.target.value)}
-                      className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#A3BA13] focus:outline-none"
+                      className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-zinc-500 focus:border-[#25D366] focus:outline-none"
                     />
                   </div>
-                </div>
 
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-white uppercase flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-[#F2C700]" /> Email de Contacto
-                  </label>
-                  <input
-                    type="email"
-                    placeholder="ejemplo@gmail.com"
-                    value={parentEmail}
-                    onChange={(e) => setParentEmail(e.target.value)}
-                    className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#F2C700] focus:outline-none"
-                  />
-                </div>
-
-                {/* Birthday Child Info */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-white/20">
-                  <div className="space-y-1">
+                  {/* Child Name */}
+                  <div className="space-y-1.5">
                     <label className="text-xs font-black text-white uppercase flex items-center gap-1.5">
                       <Gift className="w-3.5 h-3.5 text-[#ED3078]" /> Nombre del Cumpleañer@ *
                     </label>
                     <input
                       type="text"
                       required
-                      placeholder="Ej: Santino"
+                      placeholder="Ej: Felipe"
                       value={childName}
                       onChange={(e) => setChildName(e.target.value)}
-                      className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#ED3078] focus:outline-none"
+                      className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-4 py-3 text-xs sm:text-sm text-white placeholder-zinc-500 focus:border-[#ED3078] focus:outline-none"
                     />
                   </div>
 
-                  <div className="space-y-1">
-                    <label className="text-xs font-black text-white uppercase">¿Cuántos años cumple?</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={15}
-                      value={childAge}
-                      onChange={(e) => setChildAge(Number(e.target.value))}
-                      className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white focus:border-[#1EB8BF] focus:outline-none"
-                    />
-                  </div>
-                </div>
+                  {/* Child Age & Estimated Kids */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-black text-white uppercase">
+                        Edad a Cumplir
+                      </label>
+                      <select
+                        value={childAge}
+                        onChange={(e) => setChildAge(Number(e.target.value))}
+                        className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-3 py-3 text-xs sm:text-sm text-white focus:border-[#1EB8BF] focus:outline-none cursor-pointer"
+                      >
+                        {[3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((age) => (
+                          <option key={age} value={age}>{age} años</option>
+                        ))}
+                      </select>
+                    </div>
 
-                {/* Kids Count Selector */}
-                <div className="space-y-2 pt-2 border-t border-white/20">
-                  <div className="flex justify-between items-center text-xs font-black text-white uppercase">
-                    <span>Cantidad estimada de invitados (chicos):</span>
-                    <span className="text-[#1EB8BF] font-black text-sm">{estimatedKids} chicos</span>
-                  </div>
-
-                  <input
-                    type="range"
-                    min={10}
-                    max={35}
-                    value={estimatedKids}
-                    onChange={(e) => handleKidsCountChange(Number(e.target.value))}
-                    className="w-full accent-[#1EB8BF] cursor-pointer"
-                  />
-
-                  {/* Package Badge explanation */}
-                  <div className="bg-zinc-950/60 p-3 rounded-xl border border-white/20 text-xs text-white font-medium shadow-inner">
-                    <div>
-                      <span className="font-black text-[#F2C700] uppercase">
-                        {additionalPackage === 'base_20' ? 'Contrato Base (Hasta 20 chicos)' : additionalPackage === 'adicional_21_28' ? 'Adicional 1 (21 a 28 chicos)' : 'Adicional 2 (29 a 35 chicos)'}
-                      </span>
-                      <p className="text-[11px] text-zinc-300">
-                        {additionalPackage === 'base_20'
-                          ? 'Incluye 20 chicos y profesores a cargo.'
-                          : 'Requiere personal adicional de apoyo para seguridad.'}
-                      </p>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-black text-white uppercase">
+                        Invitados (Chicos)
+                      </label>
+                      <input
+                        type="number"
+                        min={10}
+                        max={35}
+                        value={estimatedKids}
+                        onChange={(e) => handleKidsCountChange(Number(e.target.value))}
+                        className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-3 py-3 text-xs sm:text-sm text-white focus:border-[#1EB8BF] focus:outline-none"
+                      />
                     </div>
                   </div>
                 </div>
 
-                {/* Catering note for adults */}
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-white uppercase">
-                    ¿Van a traer comida para el sector Adultos? (Opcional)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Ej: Embutidos, empanadas, gaseosas para los padres..."
-                    value={adultsFoodInfo}
-                    onChange={(e) => setAdultsFoodInfo(e.target.value)}
-                    className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2 text-xs font-medium text-white focus:border-[#1EB8BF] focus:outline-none"
-                  />
-                  <p className="text-[11px] text-zinc-300 font-medium">
-                    *Recordá que para los chicos incluye el menú saludable de 1 pancho x chico por la actividad física constante.
-                  </p>
+                {/* Additional Package Tier Banner */}
+                <div className="bg-zinc-950/90 border border-zinc-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <span className="font-heading font-black uppercase text-white block">
+                      {estimatedKids <= 20 
+                        ? 'Contrato Base (Hasta 20 Chicos)' 
+                        : estimatedKids <= 28 
+                        ? 'Adicional 1 (De 21 a 28 Chicos)' 
+                        : 'Adicional 2 (De 29 a 35 Chicos)'}
+                    </span>
+                    <span className="text-zinc-400 text-[11px]">
+                      Incluye 2 1/2 horas de juego activo, profes en atracciones, tarjetas virtuales y menú infantil.
+                    </span>
+                  </div>
+                  <span className="px-3 py-1 rounded-lg bg-[#A3BA13] text-black font-black uppercase self-start sm:self-auto text-[11px]">
+                    Tarifa Congelada c/ Seña
+                  </span>
                 </div>
 
                 {/* Notes */}
-                <div className="space-y-1">
-                  <label className="text-xs font-black text-white uppercase">Notas o Consultas Adicionales</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-zinc-300 uppercase">
+                    Comentarios o Consultas Especiales (Opcional)
+                  </label>
                   <textarea
                     rows={2}
-                    placeholder="Ej: Temática especial, alergias o consultas particulares..."
+                    placeholder="Temática, alimentos especiales para adultos, etc."
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    className="w-full bg-zinc-950/60 border border-white/20 rounded-xl px-3.5 py-2 text-xs font-medium text-white focus:border-[#1EB8BF] focus:outline-none"
+                    className="w-full bg-zinc-950 border-2 border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-white placeholder-zinc-500 focus:border-[#1EB8BF] focus:outline-none"
                   />
                 </div>
 
-                {/* Submit button */}
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full bg-[#1EB8BF] hover:bg-white text-black font-black text-xs uppercase tracking-wider py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
-                >
-                  <Send className="w-4 h-4 text-black" />
-                  <span>Enviar Solicitud de Reserva</span>
-                </button>
+                {/* Submit Action */}
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full bg-gradient-to-r from-[#F2C700] via-[#e6bd00] to-[#cfa300] hover:brightness-105 active:scale-[0.99] text-black font-heading font-black text-base uppercase py-4 px-6 rounded-2xl shadow-[0_6px_25px_rgba(242,199,0,0.45)] transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {isSubmitting ? (
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <Send className="w-5 h-5" />
+                        <span>Solicitar Reserva para {selectedBranch?.name}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
 
               </form>
-            </div>
+            )}
 
           </div>
         )}
@@ -534,4 +726,3 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({
     </section>
   );
 };
-

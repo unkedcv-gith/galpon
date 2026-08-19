@@ -1,9 +1,41 @@
+export type UserRole = 'superadmin' | 'admin' | 'franquista' | 'web_user';
+
 export type ReservationStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+
+export interface Branch {
+  id: string; // e.g. "calle-5", "calle-13"
+  name: string; // "El Galpón Calle 5"
+  address: string; // "Calle 5 e/ 58 y 59"
+  city: string; // "La Plata"
+  phone: string; // "+54 9 221 573-1047"
+  whatsappNumber: string; // "5492215731047"
+  franquistaUserId?: string;
+  franquistaName?: string;
+  franquistaEmail?: string;
+  isActive: boolean;
+  color?: string;
+  createdAt: string;
+}
+
+export interface AppUser {
+  uid: string;
+  email: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  assignedBranchId?: string; // required if role === 'franquista'
+  assignedBranchName?: string;
+  phone?: string;
+  createdAt: string;
+}
 
 export interface Reservation {
   id: string;
+  branchId: string; // "calle-5" | "calle-13"
+  branchName: string;
   createdAt: string;
   date: string; // YYYY-MM-DD
+  monthKey?: string; // YYYY-MM for fast monthly aggregation
   slotId: string;
   slotTime: string; // e.g. "15:00 a 17:30 hs"
   parentName: string;
@@ -15,9 +47,24 @@ export interface Reservation {
   status: ReservationStatus;
   depositPaid: boolean;
   depositAmount: number;
+  totalPrice?: number;
   notes?: string;
   additionalPackage: 'base_20' | 'adicional_21_28' | 'adicional_29_35';
   adultsFoodInfo?: string;
+  createdByRole?: UserRole;
+}
+
+export interface Inquiry {
+  id: string;
+  branchId: string;
+  branchName: string;
+  senderName: string;
+  senderPhone: string;
+  senderEmail: string;
+  topic: 'cumpleanos' | 'talleres' | 'por_un_dia' | 'general';
+  message: string;
+  status: 'new' | 'contacted' | 'resolved';
+  createdAt: string;
 }
 
 export interface TimeSlot {
@@ -28,6 +75,8 @@ export interface TimeSlot {
 }
 
 export interface BlockedDate {
+  id?: string;
+  branchId?: string; // specific to branch or 'all'
   date: string; // YYYY-MM-DD
   reason: string;
 }

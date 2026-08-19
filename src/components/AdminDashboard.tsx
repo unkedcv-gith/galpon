@@ -1,25 +1,82 @@
-import React, { useState, useEffect } from 'react';
-import { Reservation, BlockedDate } from '../types';
-import { getReservations, updateReservationStatus, deleteReservation, getBlockedDates, toggleBlockDate, addReservation, setAdminAuthenticated } from '../services/storage';
-import { TIME_SLOTS, BRAND_INFO } from '../data/initialData';
-import { Shield, CheckCircle2, XCircle, Clock, Search, Trash2, MessageCircle, DollarSign, Lock, Plus, LogOut, FileText, Check } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Reservation, BlockedDate, Branch, AppUser, Inquiry, UserRole } from '../types';
+import { 
+  getReservations, 
+  updateReservationStatus, 
+  deleteReservation, 
+  getBlockedDates, 
+  toggleBlockDate, 
+  addReservation, 
+  getBranches,
+  addBranch,
+  updateBranch,
+  deleteBranch,
+  getAppUsers,
+  addAppUser,
+  deleteAppUser,
+  getInquiries,
+  updateInquiryStatus,
+  getCurrentUser,
+  logoutUser
+} from '../services/storage';
+import { TIME_SLOTS } from '../data/initialData';
+import { 
+  Shield, 
+  CheckCircle2, 
+  XCircle, 
+  Clock, 
+  Search, 
+  Trash2, 
+  MessageCircle, 
+  DollarSign, 
+  Lock, 
+  Plus, 
+  LogOut, 
+  FileText, 
+  Check,
+  Building2,
+  Users,
+  Crown,
+  Store,
+  MapPin,
+  Calendar as CalendarIcon,
+  Filter,
+  Phone,
+  Mail,
+  User,
+  RefreshCw,
+  Sparkles,
+  ChevronDown
+} from 'lucide-react';
 
 interface AdminDashboardProps {
   onCloseAdmin: () => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) => {
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getCurrentUser());
+  
+  // Data states
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [blockedDates, setBlockedDates] = useState<BlockedDate[]>([]);
-  const [activeTab, setActiveTab] = useState<'reservas' | 'bloqueo' | 'nueva'>('reservas');
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+
+  // Navigation & Filter states
+  const [activeTab, setActiveTab] = useState<'reservas' | 'consultas' | 'bloqueo' | 'nueva' | 'sucursales' | 'usuarios'>('reservas');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState<string>('all');
+  const [selectedMonthFilter, setSelectedMonthFilter] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('todos');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Block date form state
   const [blockDateStr, setBlockDateStr] = useState(new Date().toISOString().split('T')[0]);
   const [blockReason, setBlockReason] = useState('Evento Privado / Mantenimiento');
+  const [blockBranchId, setBlockBranchId] = useState<string>('all');
 
   // Manual reservation state
+  const [manualBranchId, setManualBranchId] = useState<string>('calle-5');
   const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
   const [manualSlot, setManualSlot] = useState('turn_afternoon_1');
   const [manualParent, setManualParent] = useState('');
@@ -29,9 +86,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
   const [manualKids, setManualKids] = useState(20);
   const [manualNotes, setManualNotes] = useState('');
 
+  // SuperAdmin: New Branch Form State
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchAddress, setNewBranchAddress] = useState('');
+  const [newBranchCity, setNewBranchCity] = useState('La Plata');
+  const [newBranchPhone, setNewBranchPhone] = useState('');
+  const [newBranchWhatsapp, setNewBranchWhatsapp] = useState('');
+  const [newBranchFranName, setNewBranchFranName] = useState('');
+  const [isAddingBranch, setIsAddingBranch] = useState(false);
+
+  // SuperAdmin: New User Form State
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('franquista');
+  const [newUserBranchId, setNewUserBranchId] = useState('');
+  const [isAddingUser, setIsAddingUser] = useState(false);
+
   const loadData = () => {
+    const loadedBranches = getBranches();
+    setBranches(loadedBranches);
     setReservations(getReservations());
+    setInquiries(getInquiries());
     setBlockedDates(getBlockedDates());
+    setAppUsers(getAppUsers());
+
+    // If user is franquista, force branch filter to their assigned branch
+    const user = getCurrentUser();
+    setCurrentUser(user);
+    if (user && user.role === 'franquista' && user.assignedBranchId) {
+      setSelectedBranchFilter(user.assignedBranchId);
+      setManualBranchId(user.assignedBranchId);
+      setBlockBranchId(user.assignedBranchId);
+    } else if (loadedBranches.length > 0) {
+      setManualBranchId(loadedBranches[0].id);
+    }
   };
 
   useEffect(() => {
@@ -44,36 +133,114 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
   }, []);
 
   const handleLogout = () => {
-    setAdminAuthenticated(false);
+    logoutUser();
     onCloseAdmin();
   };
 
-  const handleUpdateStatus = (id: string, status: Reservation['status']) => {
-    const updated = updateReservationStatus(id, status, status === 'approved');
+  // Role permissions helpers
+  const isSuperAdmin = currentUser?.role === 'superadmin';
+  const isAdmin = currentUser?.role === 'admin' || isSuperAdmin;
+  const isFranquista = currentUser?.role === 'franquista';
+
+  // Available unique months list for filtering
+  const availableMonths = useMemo(() => {
+    const monthsSet = new Set<string>();
+    reservations.forEach((r) => {
+      if (r.date && r.date.length >= 7) {
+        monthsSet.add(r.date.substring(0, 7)); // "YYYY-MM"
+      }
+    });
+    return Array.from(monthsSet).sort().reverse();
+  }, [reservations]);
+
+  // Format YYYY-MM into Spanish string
+  const formatMonthLabel = (monthKey: string) => {
+    if (monthKey === 'all') return 'Todos los Meses';
+    const [y, m] = monthKey.split('-');
+    const d = new Date(parseInt(y), parseInt(m) - 1, 1);
+    return d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  };
+
+  // Filtered reservations list based on Role + Branch + Month + Status + Search
+  const filteredReservations = useMemo(() => {
+    return reservations.filter((r) => {
+      // 1. Branch permission filter
+      if (isFranquista && currentUser?.assignedBranchId) {
+        if (r.branchId !== currentUser.assignedBranchId) return false;
+      } else if (selectedBranchFilter !== 'all') {
+        if (r.branchId !== selectedBranchFilter) return false;
+      }
+
+      // 2. Month filter
+      if (selectedMonthFilter !== 'all') {
+        if (!r.date.startsWith(selectedMonthFilter)) return false;
+      }
+
+      // 3. Status filter
+      if (filterStatus !== 'todos') {
+        if (r.status !== filterStatus) return false;
+      }
+
+      // 4. Text search
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matches =
+          r.parentName.toLowerCase().includes(q) ||
+          r.childName.toLowerCase().includes(q) ||
+          r.parentPhone.toLowerCase().includes(q) ||
+          r.branchName.toLowerCase().includes(q) ||
+          r.date.includes(q);
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [reservations, isFranquista, currentUser, selectedBranchFilter, selectedMonthFilter, filterStatus, searchQuery]);
+
+  // Filtered inquiries list
+  const filteredInquiries = useMemo(() => {
+    return inquiries.filter((inq) => {
+      if (isFranquista && currentUser?.assignedBranchId) {
+        return inq.branchId === currentUser.assignedBranchId;
+      }
+      if (selectedBranchFilter !== 'all') {
+        return inq.branchId === selectedBranchFilter;
+      }
+      return true;
+    });
+  }, [inquiries, isFranquista, currentUser, selectedBranchFilter]);
+
+  // Status management
+  const handleUpdateStatus = async (id: string, status: Reservation['status']) => {
+    const updated = await updateReservationStatus(id, status, status === 'approved');
     setReservations(updated);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (confirm('¿Estás seguro de eliminar esta reserva?')) {
-      const updated = deleteReservation(id);
+      const updated = await deleteReservation(id);
       setReservations(updated);
     }
   };
 
   const handleToggleBlock = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = toggleBlockDate(blockDateStr, blockReason);
+    const updated = toggleBlockDate(blockDateStr, blockReason, blockBranchId);
     setBlockedDates(updated);
   };
 
-  const handleCreateManual = (e: React.FormEvent) => {
+  const handleCreateManual = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualParent || !manualChild) {
       alert('Por favor completá Nombre del Adulto y Nombre del Cumpleañer@.');
       return;
     }
     const slotObj = TIME_SLOTS.find(s => s.id === manualSlot);
-    addReservation({
+    const branchObj = branches.find(b => b.id === manualBranchId);
+
+    await addReservation({
+      branchId: manualBranchId,
+      branchName: branchObj?.name || 'El Galpón',
       date: manualDate,
       slotId: manualSlot,
       slotTime: slotObj?.timeRange || '15:00 a 17:30 hs',
@@ -84,397 +251,611 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
       childAge: manualAge,
       estimatedKids: manualKids,
       additionalPackage: manualKids <= 20 ? 'base_20' : manualKids <= 28 ? 'adicional_21_28' : 'adicional_29_35',
-      notes: `[Carga Manual Admin] ${manualNotes}`,
+      notes: `[Carga Manual por ${currentUser?.displayName || 'Admin'}] ${manualNotes}`,
+      createdByRole: currentUser?.role,
     });
-    // Approve manually added reservation
+
     loadData();
     setActiveTab('reservas');
-    // Reset
     setManualParent('');
     setManualPhone('');
     setManualChild('');
     setManualNotes('');
   };
 
-  // Filtered reservations list
-  const filteredReservations = reservations.filter((r) => {
-    const matchesStatus = filterStatus === 'todos' || r.status === filterStatus;
-    const q = searchQuery.toLowerCase();
-    const matchesSearch =
-      r.parentName.toLowerCase().includes(q) ||
-      r.childName.toLowerCase().includes(q) ||
-      r.parentPhone.toLowerCase().includes(q) ||
-      r.date.includes(q);
-    return matchesStatus && matchesSearch;
-  });
+  // SuperAdmin: Add new branch
+  const handleAddBranchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBranchName || !newBranchAddress) return;
 
-  // Analytics Metrics
-  const totalReservations = reservations.length;
-  const approvedCount = reservations.filter((r) => r.status === 'approved').length;
-  const pendingCount = reservations.filter((r) => r.status === 'pending').length;
-  const totalRevenueDeposits = reservations
+    await addBranch({
+      name: newBranchName,
+      address: newBranchAddress,
+      city: newBranchCity,
+      phone: newBranchPhone || '221 500-0000',
+      whatsappNumber: newBranchWhatsapp ? newBranchWhatsapp.replace(/\D/g, '') : '5492215000000',
+      franquistaName: newBranchFranName,
+      isActive: true,
+      color: '#F2C700',
+    });
+
+    setNewBranchName('');
+    setNewBranchAddress('');
+    setNewBranchPhone('');
+    setNewBranchWhatsapp('');
+    setNewBranchFranName('');
+    setIsAddingBranch(false);
+    loadData();
+  };
+
+  // SuperAdmin: Toggle branch status
+  const handleToggleBranchActive = async (branchId: string, currentStatus: boolean) => {
+    await updateBranch(branchId, { isActive: !currentStatus });
+    loadData();
+  };
+
+  // SuperAdmin: Add new user
+  const handleAddUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserName || !newUserUsername) return;
+
+    const assignedBranch = branches.find(b => b.id === newUserBranchId);
+
+    await addAppUser({
+      displayName: newUserName,
+      username: newUserUsername.toLowerCase().trim(),
+      email: newUserEmail || `${newUserUsername.toLowerCase().trim()}@elgalpon.com`,
+      role: newUserRole,
+      assignedBranchId: newUserRole === 'franquista' ? newUserBranchId : undefined,
+      assignedBranchName: newUserRole === 'franquista' ? assignedBranch?.name : undefined,
+    });
+
+    setNewUserName('');
+    setNewUserUsername('');
+    setNewUserEmail('');
+    setIsAddingUser(false);
+    loadData();
+  };
+
+  // Analytics Metrics for the active filter
+  const totalInFilter = filteredReservations.length;
+  const approvedInFilter = filteredReservations.filter((r) => r.status === 'approved').length;
+  const pendingInFilter = filteredReservations.filter((r) => r.status === 'pending').length;
+  const totalRevenueDeposits = filteredReservations
     .filter((r) => r.status === 'approved' && r.depositPaid)
     .reduce((sum, r) => sum + (r.depositAmount || 50000), 0);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black text-white overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-zinc-950 text-white overflow-y-auto">
       
-      {/* Top Admin Navbar */}
-      <div className="bg-zinc-950 border-b-2 border-zinc-800 sticky top-0 z-20 px-4 sm:px-8 py-4 flex items-center justify-between">
+      {/* ========================================================================= */}
+      {/* TOP ADMIN HEADER BAR                                                      */}
+      {/* ========================================================================= */}
+      <div className="bg-black border-b-2 border-zinc-800 sticky top-0 z-30 px-4 sm:px-8 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        
+        {/* Brand & User Role Badge */}
         <div className="flex items-center gap-3">
-          <img src="/marca_el_galpon_blanca.svg" alt="El Galpón" className="h-10 w-auto object-contain" />
+          <img src="/marca_el_galpon_blanca.svg" alt="El Galpón" className="h-9 w-auto object-contain" />
+          
           <div>
-            <h1 className="font-heading font-black text-lg text-white flex items-center gap-2 uppercase">
-              Panel de Administración <span className="text-black text-xs px-2.5 py-0.5 rounded-full bg-[#1EB8BF] font-black">El Galpón</span>
-            </h1>
-            <p className="text-xs text-zinc-400 font-medium">Gestión de turnos de cumpleaños, señas y disponibilidad</p>
+            <div className="flex items-center gap-2">
+              <h1 className="font-heading font-black text-base sm:text-lg text-white uppercase flex items-center gap-2">
+                Panel Central
+              </h1>
+
+              {/* Dynamic Role Badge */}
+              <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black uppercase flex items-center gap-1 ${
+                isSuperAdmin 
+                  ? 'bg-[#ED3078] text-white shadow-[0_0_12px_rgba(237,48,120,0.5)]'
+                  : isAdmin 
+                  ? 'bg-[#F2C700] text-black shadow-[0_0_12px_rgba(242,199,0,0.4)]'
+                  : 'bg-[#1EB8BF] text-black shadow-[0_0_12px_rgba(30,184,191,0.4)]'
+              }`}>
+                {isSuperAdmin ? <Crown className="w-3 h-3" /> : isAdmin ? <Building2 className="w-3 h-3" /> : <Store className="w-3 h-3" />}
+                <span>{currentUser?.displayName || (isSuperAdmin ? 'SuperAdmin' : isAdmin ? 'Admin Dueño' : 'Franquista')}</span>
+              </span>
+            </div>
+            
+            <p className="text-[11px] text-zinc-400 font-medium">
+              {isSuperAdmin 
+                ? 'Control absoluto multi-sucursal, altas de administradores y franquistas.'
+                : isAdmin
+                ? 'Supervisión general de todas las franquicias y reservas del negocio.'
+                : `Gestión exclusiva de la sucursal: ${currentUser?.assignedBranchName || 'Asignada'}`}
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Branch Switcher & Quick Actions */}
+        <div className="flex items-center gap-2.5 self-end md:self-auto">
+          
+          {/* Branch Switcher (Enabled for SuperAdmin & Admin, Locked for Franquista) */}
+          <div className="flex items-center gap-1.5 bg-zinc-900 border border-zinc-700 rounded-xl px-2.5 py-1.5 text-xs">
+            <MapPin className="w-3.5 h-3.5 text-[#1EB8BF]" />
+            {isFranquista ? (
+              <span className="font-black text-white">{currentUser?.assignedBranchName || 'Mi Sucursal'}</span>
+            ) : (
+              <select
+                value={selectedBranchFilter}
+                onChange={(e) => setSelectedBranchFilter(e.target.value)}
+                className="bg-transparent text-white font-black text-xs uppercase focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-zinc-900 text-white">Todas las Sucursales</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id} className="bg-zinc-900 text-white">
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Close & Logout buttons */}
           <button
             onClick={onCloseAdmin}
-            className="px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-black text-white uppercase transition-colors"
+            className="px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-black text-white uppercase transition-colors cursor-pointer"
           >
             Volver a la Web
           </button>
+
           <button
             onClick={handleLogout}
-            className="px-3.5 py-2 rounded-xl bg-[#ED3078] hover:bg-[#d42767] text-xs font-black text-white transition-colors flex items-center gap-1.5 uppercase"
+            className="p-2 rounded-xl bg-zinc-900 hover:bg-[#ED3078]/20 text-zinc-300 hover:text-[#ED3078] border border-zinc-700 transition-colors cursor-pointer"
+            title="Cerrar Sesión"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            Cerrar Sesión
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
+
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8 space-y-6">
-        
-        {/* Metrics Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-1">
-            <div className="text-xs font-black text-zinc-400 uppercase tracking-wider">Total Reservas</div>
-            <div className="text-3xl font-heading font-black text-white">{totalReservations}</div>
-            <p className="text-[11px] font-medium text-zinc-500">Solicitudes registradas en sistema</p>
-          </div>
+      {/* ========================================================================= */}
+      {/* MAIN ADMIN BODY                                                           */}
+      {/* ========================================================================= */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-          <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-1">
-            <div className="text-xs font-black text-[#1EB8BF] uppercase tracking-wider flex items-center justify-between">
-              <span>Turnos Aprobados</span>
-              <CheckCircle2 className="w-4 h-4 text-[#1EB8BF]" />
-            </div>
-            <div className="text-3xl font-heading font-black text-[#1EB8BF]">{approvedCount}</div>
-            <p className="text-[11px] font-medium text-zinc-500">Cumpleaños confirmados con seña</p>
-          </div>
+        {/* NAVIGATION TABS */}
+        <div className="flex items-center gap-2 border-b-2 border-zinc-800 pb-3 overflow-x-auto">
+          
+          <button
+            onClick={() => setActiveTab('reservas')}
+            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'reservas'
+                ? 'bg-[#1EB8BF] text-black shadow-md'
+                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <CalendarIcon className="w-4 h-4" />
+            <span>Reservas & Festejos</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-black/20 text-current">
+              {filteredReservations.length}
+            </span>
+          </button>
 
-          <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-1">
-            <div className="text-xs font-black text-[#F2C700] uppercase tracking-wider flex items-center justify-between">
-              <span>Pendientes</span>
-              <Clock className="w-4 h-4 text-[#F2C700]" />
-            </div>
-            <div className="text-3xl font-heading font-black text-[#F2C700]">{pendingCount}</div>
-            <p className="text-[11px] font-medium text-zinc-500">A la espera de pago o confirmación</p>
-          </div>
+          <button
+            onClick={() => setActiveTab('consultas')}
+            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'consultas'
+                ? 'bg-[#F2C700] text-black shadow-md'
+                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <MessageCircle className="w-4 h-4" />
+            <span>Consultas Web</span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-black/20 text-current">
+              {filteredInquiries.length}
+            </span>
+          </button>
 
-          <div className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-1">
-            <div className="text-xs font-black text-zinc-300 uppercase tracking-wider flex items-center justify-between">
-              <span>Señas Recaudadas</span>
-              <DollarSign className="w-4 h-4 text-zinc-300" />
-            </div>
-            <div className="text-2xl font-heading font-black text-white">
-              ${totalRevenueDeposits.toLocaleString('es-AR')}
-            </div>
-            <p className="text-[11px] font-medium text-zinc-500">Congelamiento de tarifa activo</p>
-          </div>
+          <button
+            onClick={() => setActiveTab('bloqueo')}
+            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'bloqueo'
+                ? 'bg-[#ED3078] text-white shadow-md'
+                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <Lock className="w-4 h-4" />
+            <span>Bloqueo de Fechas</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('nueva')}
+            className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'nueva'
+                ? 'bg-[#A3BA13] text-black shadow-md'
+                : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            <span>Cargar Reserva Manual</span>
+          </button>
+
+          {/* SUPERADMIN EXCLUSIVE TABS */}
+          {isSuperAdmin && (
+            <>
+              <button
+                onClick={() => setActiveTab('sucursales')}
+                className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                  activeTab === 'sucursales'
+                    ? 'bg-[#ED3078] text-white shadow-md'
+                    : 'bg-zinc-900 border border-[#ED3078]/40 text-[#ED3078] hover:bg-[#ED3078]/10'
+                }`}
+              >
+                <Store className="w-4 h-4" />
+                <span>Gestión de Franquicias</span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 text-white">
+                  {branches.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('usuarios')}
+                className={`px-4 py-2.5 rounded-xl font-heading font-black text-xs uppercase tracking-wider flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                  activeTab === 'usuarios'
+                    ? 'bg-[#F2C700] text-black shadow-md'
+                    : 'bg-zinc-900 border border-[#F2C700]/40 text-[#F2C700] hover:bg-[#F2C700]/10'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Usuarios & Permisos</span>
+              </button>
+            </>
+          )}
+
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-zinc-800 pb-4">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab('reservas')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-2 ${
-                activeTab === 'reservas'
-                  ? 'bg-[#1EB8BF] text-black font-black'
-                  : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              <span>Gestión de Reservas</span>
-            </button>
+        {/* ========================================================================= */}
+        {/* TAB 1: RESERVAS & HISTORIAL MENSUAL                                       */}
+        {/* ========================================================================= */}
+        {activeTab === 'reservas' && (
+          <div className="space-y-6">
 
-            <button
-              onClick={() => setActiveTab('bloqueo')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-2 ${
-                activeTab === 'bloqueo'
-                  ? 'bg-[#1EB8BF] text-black font-black'
-                  : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800'
-              }`}
-            >
-              <Lock className="w-4 h-4" />
-              <span>Bloqueo de Fechas</span>
-            </button>
+            {/* MONTHLY HISTORY FILTER & KPI CARDS */}
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xl">
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-800 pb-4">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-[#F2C700]" />
+                  <div>
+                    <h2 className="font-heading font-black text-base sm:text-lg text-white uppercase">
+                      Historial Mensual & Métricas
+                    </h2>
+                    <p className="text-xs text-zinc-400">
+                      Visualizando: <strong className="text-[#1EB8BF]">{formatMonthLabel(selectedMonthFilter)}</strong>
+                      {selectedBranchFilter !== 'all' && ` • ${branches.find(b => b.id === selectedBranchFilter)?.name}`}
+                    </p>
+                  </div>
+                </div>
 
-            <button
-              onClick={() => setActiveTab('nueva')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase transition-all flex items-center gap-2 ${
-                activeTab === 'nueva'
-                  ? 'bg-[#1EB8BF] text-black font-black'
-                  : 'bg-zinc-900 text-zinc-300 hover:bg-zinc-800 border border-zinc-800'
-              }`}
-            >
-              <Plus className="w-4 h-4" />
-              <span>Cargar Reserva Manual</span>
-            </button>
-          </div>
+                {/* Month/Year Filter Dropdown */}
+                <div className="flex items-center gap-2 bg-black border border-zinc-700 rounded-2xl px-3 py-2">
+                  <CalendarIcon className="w-4 h-4 text-[#F2C700]" />
+                  <select
+                    value={selectedMonthFilter}
+                    onChange={(e) => setSelectedMonthFilter(e.target.value)}
+                    className="bg-transparent text-white font-black text-xs uppercase focus:outline-none cursor-pointer"
+                  >
+                    <option value="all" className="bg-zinc-900 text-white">Todos los Meses (Histórico)</option>
+                    {availableMonths.map((monthKey) => (
+                      <option key={monthKey} value={monthKey} className="bg-zinc-900 text-white">
+                        {formatMonthLabel(monthKey)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
-          {activeTab === 'reservas' && (
-            <div className="flex items-center gap-3">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              {/* Metric Cards Row */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                
+                <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase block">Total Reservas</span>
+                  <div className="font-heading font-black text-2xl text-white flex items-center justify-between">
+                    <span>{totalInFilter}</span>
+                    <CalendarIcon className="w-5 h-5 text-[#1EB8BF]" />
+                  </div>
+                </div>
+
+                <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase block">Aprobadas / Con Seña</span>
+                  <div className="font-heading font-black text-2xl text-[#A3BA13] flex items-center justify-between">
+                    <span>{approvedInFilter}</span>
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase block">Pendientes Seña</span>
+                  <div className="font-heading font-black text-2xl text-[#ED3078] flex items-center justify-between">
+                    <span>{pendingInFilter}</span>
+                    <Clock className="w-5 h-5" />
+                  </div>
+                </div>
+
+                <div className="bg-black/60 border border-zinc-800 rounded-2xl p-4 space-y-1">
+                  <span className="text-[11px] font-bold text-zinc-400 uppercase block">Señas Recaudadas</span>
+                  <div className="font-heading font-black text-2xl text-[#F2C700] flex items-center justify-between">
+                    <span>${totalRevenueDeposits.toLocaleString('es-AR')}</span>
+                    <DollarSign className="w-5 h-5" />
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* SEARCH & STATUS FILTER BAR */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-900 border border-zinc-800 rounded-2xl p-3.5">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
                 <input
                   type="text"
-                  placeholder="Buscar cliente, niño, tel..."
+                  placeholder="Buscar por niño, adulto, celular..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="bg-zinc-950 border-2 border-zinc-800 rounded-xl pl-9 pr-3 py-2 text-xs font-medium text-white focus:outline-none focus:border-[#1EB8BF] w-56"
+                  className="w-full bg-black border border-zinc-700 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-zinc-500 focus:border-[#1EB8BF] focus:outline-none"
                 />
               </div>
 
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-                className="bg-zinc-950 border-2 border-zinc-800 rounded-xl px-3 py-2 text-xs font-black text-white focus:outline-none focus:border-[#1EB8BF] uppercase"
-              >
-                <option value="todos">Todos los estados</option>
-                <option value="pending">Pendientes</option>
-                <option value="approved">Aprobados</option>
-                <option value="rejected">Rechazados</option>
-              </select>
+              <div className="flex items-center gap-1.5 w-full sm:w-auto overflow-x-auto">
+                {['todos', 'pending', 'approved', 'rejected'].map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase transition-all cursor-pointer whitespace-nowrap ${
+                      filterStatus === status
+                        ? 'bg-white text-black'
+                        : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {status === 'todos' ? 'Todos' : status === 'pending' ? 'Pendientes' : status === 'approved' ? 'Aprobadas' : 'Rechazadas'}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
 
-        {/* Tab 1: Reservas List */}
-        {activeTab === 'reservas' && (
-          <div className="space-y-4">
+            {/* RESERVATIONS TABLE / CARDS */}
             {filteredReservations.length === 0 ? (
-              <div className="bg-black border-2 border-zinc-800 rounded-3xl p-12 text-center text-zinc-400 font-medium text-sm">
-                No se encontraron reservas con los criterios especificados.
+              <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center space-y-2">
+                <CalendarIcon className="w-10 h-10 text-zinc-600 mx-auto" />
+                <h3 className="font-heading font-black text-lg text-white uppercase">No hay reservas registradas</h3>
+                <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+                  No se encontraron reservas que coincidan con los filtros de sucursal y mes seleccionados.
+                </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 gap-3.5">
                 {filteredReservations.map((res) => {
                   const isApproved = res.status === 'approved';
                   const isPending = res.status === 'pending';
-                  const isRejected = res.status === 'rejected';
-
-                  const whatsappNotifyUrl = `https://wa.me/549${res.parentPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                    `Hola ${res.parentName}! Te escribimos de El Galpón. Tu reserva para el cumpleaños de ${res.childName} el día ${res.date} (${res.slotTime}) ha sido ${
-                      isApproved ? 'APROBADA Y CONFIRMADA 🎉. ¡Seña registrada correctamente!' : 'revisada. Por favor comunicate con nosotros.'
-                    }`
-                  )}`;
 
                   return (
                     <div
                       key={res.id}
-                      className={`bg-zinc-900 border rounded-2xl p-6 transition-all space-y-4 ${
+                      className={`bg-zinc-900/90 border-2 rounded-2xl p-4 sm:p-5 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
                         isApproved
-                          ? 'border-[#A3BA13]/50'
+                          ? 'border-[#A3BA13]/50 hover:border-[#A3BA13]'
                           : isPending
-                          ? 'border-[#F2C700]/50'
+                          ? 'border-[#ED3078]/50 hover:border-[#ED3078]'
                           : 'border-zinc-800'
                       }`}
                     >
-                      {/* Top Bar */}
-                      <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-zinc-800 pb-3">
-                        <div className="flex items-center gap-3">
-                          <span className="font-mono text-xs text-black font-black bg-[#1EB8BF] px-2.5 py-1 rounded-lg">
-                            #{res.id}
+                      {/* Left: Booking Details */}
+                      <div className="space-y-2 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-zinc-200 text-xs font-black uppercase flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-[#1EB8BF]" /> {res.branchName}
                           </span>
-                          <span className="font-heading font-black text-lg text-white uppercase">
-                            Cumple de {res.childName} ({res.childAge} Años)
+                          <span className="px-2.5 py-0.5 rounded-md bg-zinc-950 text-[#F2C700] text-xs font-black">
+                            {res.date} • {res.slotTime}
+                          </span>
+                          <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase ${
+                            isApproved 
+                              ? 'bg-[#A3BA13] text-black' 
+                              : isPending 
+                              ? 'bg-[#ED3078] text-white' 
+                              : 'bg-zinc-800 text-zinc-400'
+                          }`}>
+                            {isApproved ? 'Aprobada / Seña OK' : isPending ? 'Pendiente de Seña' : 'Cancelada'}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          {isApproved && (
-                            <span className="px-3 py-1 rounded-full text-xs font-black bg-[#A3BA13] text-black uppercase flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-black" /> Aprobado & Congelado
-                            </span>
-                          )}
-                          {isPending && (
-                            <span className="px-3 py-1 rounded-full text-xs font-black bg-[#F2C700] text-black uppercase flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-black" /> Pendiente de Seña
-                            </span>
-                          )}
-                          {isRejected && (
-                            <span className="px-3 py-1 rounded-full text-xs font-black bg-[#ED3078] text-white uppercase flex items-center gap-1">
-                              <XCircle className="w-3.5 h-3.5 text-white" /> Rechazado
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Details Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-medium">
-                        <div>
-                          <span className="text-zinc-400 block font-black uppercase">Fecha y Turno:</span>
-                          <strong className="text-white text-sm">{res.date}</strong>
-                          <div className="text-[#ED3078] font-bold">{res.slotTime}</div>
+                        <div className="space-y-0.5">
+                          <h4 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
+                            Cumple de <span className="text-[#F2C700]">{res.childName}</span> ({res.childAge} años)
+                          </h4>
+                          <p className="text-xs text-zinc-300">
+                            Adulto: <strong>{res.parentName}</strong> • Cel: <strong>{res.parentPhone}</strong> • {res.estimatedKids} chicos estimados
+                          </p>
                         </div>
 
-                        <div>
-                          <span className="text-zinc-400 block font-black uppercase">Adulto Responsable:</span>
-                          <strong className="text-white">{res.parentName}</strong>
-                          <div className="text-zinc-400">{res.parentPhone}</div>
-                        </div>
-
-                        <div>
-                          <span className="text-zinc-400 block font-black uppercase">Invitados & Paquete:</span>
-                          <strong className="text-[#F2C700] font-bold">{res.estimatedKids} chicos</strong>
-                          <div className="text-zinc-400">
-                            {res.additionalPackage === 'base_20' ? 'Contrato Base 20' : res.additionalPackage === 'adicional_21_28' ? 'Adicional 21-28' : 'Adicional 29-35'}
+                        {res.notes && (
+                          <div className="bg-black/60 border border-zinc-800 rounded-xl p-2 text-xs text-zinc-300">
+                            <strong className="text-zinc-400">Nota:</strong> {res.notes}
                           </div>
-                        </div>
-
-                        <div>
-                          <span className="text-zinc-400 block font-black uppercase">Seña Registrada:</span>
-                          <strong className={res.depositPaid ? 'text-[#A3BA13] font-black' : 'text-[#F2C700] font-black'}>
-                            {res.depositPaid ? `$${res.depositAmount || 50000} (Abonado)` : 'Sin registrar'}
-                          </strong>
-                        </div>
+                        )}
                       </div>
 
-                      {/* Notes if any */}
-                      {(res.notes || res.adultsFoodInfo) && (
-                        <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs text-white font-medium space-y-1">
-                          {res.notes && <div><strong>Notas:</strong> {res.notes}</div>}
-                          {res.adultsFoodInfo && <div><strong>Comida Adultos:</strong> {res.adultsFoodInfo}</div>}
-                        </div>
-                      )}
-
-                      {/* Actions Toolbar */}
-                      <div className="pt-2 border-t-2 border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                          {!isApproved && (
+                      {/* Right: Actions */}
+                      <div className="flex flex-wrap md:flex-col items-center md:items-end gap-2 shrink-0 border-t md:border-t-0 border-zinc-800 pt-3 md:pt-0">
+                        <div className="flex items-center gap-1.5">
+                          {isPending && (
                             <button
                               onClick={() => handleUpdateStatus(res.id, 'approved')}
-                              className="bg-[#A3BA13] hover:bg-[#91a610] text-black font-black text-xs px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 uppercase"
+                              className="px-3 py-1.5 rounded-xl bg-[#A3BA13] hover:bg-[#8fa410] text-black font-black text-xs uppercase flex items-center gap-1 transition-all cursor-pointer"
+                              title="Aprobar y Confirmar Seña"
                             >
-                              <Check className="w-4 h-4" /> Aprobar y Confirmar Seña
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Aprobar Seña</span>
                             </button>
                           )}
 
                           {isApproved && (
                             <button
                               onClick={() => handleUpdateStatus(res.id, 'pending')}
-                              className="bg-[#F2C700] hover:bg-[#d9b300] text-black font-black text-xs px-3 py-2 rounded-xl transition-all uppercase"
+                              className="px-3 py-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs uppercase transition-all cursor-pointer"
+                              title="Marcar como Pendiente"
                             >
-                              Pasar a Pendiente
+                              Volver a Pendiente
                             </button>
                           )}
-
-                          {!isRejected && (
-                            <button
-                              onClick={() => handleUpdateStatus(res.id, 'rejected')}
-                              className="bg-zinc-900 border border-zinc-700 text-white font-black text-xs px-3 py-2 rounded-xl hover:border-[#ED3078] transition-all uppercase"
-                            >
-                              Rechazar
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={whatsappNotifyUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="bg-[#1EB8BF] hover:bg-[#19a1a7] text-black font-black text-xs px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 uppercase"
-                          >
-                            <MessageCircle className="w-4 h-4 text-black" />
-                            Avisar por WhatsApp
-                          </a>
 
                           <button
                             onClick={() => handleDelete(res.id)}
-                            className="p-2 rounded-xl bg-zinc-900 text-zinc-400 hover:text-[#ED3078] hover:bg-zinc-800 border border-zinc-800"
-                            title="Eliminar reserva"
+                            className="p-2 rounded-xl bg-zinc-950 hover:bg-red-950/60 text-zinc-500 hover:text-red-400 border border-zinc-800 transition-colors cursor-pointer"
+                            title="Eliminar Reserva"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
-                      </div>
 
+                        {/* WhatsApp Parent Button */}
+                        <a
+                          href={`https://wa.me/${res.parentPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                            `¡Hola ${res.parentName}! Nos comunicamos desde ${res.branchName} por la reserva del cumple de ${res.childName} el ${res.date}.`
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1 rounded-lg bg-[#25D366]/20 hover:bg-[#25D366] text-[#25D366] hover:text-black border border-[#25D366]/40 font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                        >
+                          <MessageCircle className="w-3 h-3" />
+                          <span>Contactar WhatsApp</span>
+                        </a>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
           </div>
         )}
 
-        {/* Tab 2: Bloqueo de Fechas */}
+        {/* ========================================================================= */}
+        {/* TAB 2: CONSULTAS WEB                                                      */}
+        {/* ========================================================================= */}
+        {activeTab === 'consultas' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
+                <MessageCircle className="w-5 h-5 text-[#F2C700]" /> Consultas Web Recibidas
+              </h2>
+            </div>
+
+            {filteredInquiries.length === 0 ? (
+              <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center space-y-2">
+                <MessageCircle className="w-10 h-10 text-zinc-600 mx-auto" />
+                <h3 className="font-heading font-black text-lg text-white uppercase">No hay consultas pendientes</h3>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3">
+                {filteredInquiries.map((inq) => (
+                  <div key={inq.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="px-2.5 py-0.5 rounded-md bg-zinc-800 text-[#1EB8BF] font-black text-xs uppercase flex items-center gap-1">
+                        <MapPin className="w-3 h-3" /> {inq.branchName}
+                      </span>
+                      <span className="text-xs text-zinc-400 font-medium">{new Date(inq.createdAt).toLocaleDateString('es-ES')}</span>
+                    </div>
+
+                    <div>
+                      <h4 className="font-heading font-black text-base text-white">{inq.senderName} ({inq.senderPhone})</h4>
+                      <p className="text-xs text-zinc-300 mt-1 bg-black/50 p-3 rounded-xl border border-zinc-800">{inq.message}</p>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pt-1">
+                      <a
+                        href={`https://wa.me/${inq.senderPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                          `¡Hola ${inq.senderName}! Te escribimos desde ${inq.branchName} por tu consulta en nuestra web.`
+                        )}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 rounded-xl bg-[#25D366] text-black font-black text-xs flex items-center gap-1.5"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" /> Responder por WhatsApp
+                      </a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 3: BLOQUEO DE FECHAS                                                  */}
+        {/* ========================================================================= */}
         {activeTab === 'bloqueo' && (
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-            <div className="md:col-span-5 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
-              <h3 className="font-heading font-black text-lg text-white uppercase">Bloquear Fecha en Calendario</h3>
-              <p className="text-xs text-zinc-400 font-medium">
-                Bloqueá fechas completas por feriados, mantenimiento o eventos privados para que los clientes no puedan solicitar turnos.
-              </p>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-4">
+              <h3 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
+                <Lock className="w-5 h-5 text-[#ED3078]" /> Bloquear Día
+              </h3>
 
               <form onSubmit={handleToggleBlock} className="space-y-4">
                 <div className="space-y-1">
-                  <label className="text-xs font-black text-white uppercase">Fecha a bloquear / desbloquear</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Sucursal a Bloquear</label>
+                  <select
+                    disabled={isFranquista}
+                    value={blockBranchId}
+                    onChange={(e) => setBlockBranchId(e.target.value)}
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
+                  >
+                    <option value="all">Todas las Sucursales</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Fecha</label>
                   <input
                     type="date"
                     required
                     value={blockDateStr}
                     onChange={(e) => setBlockDateStr(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs font-black text-white uppercase">Motivo</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Motivo</label>
                   <input
                     type="text"
                     required
-                    placeholder="Mantenimiento muro / Evento privado"
                     value={blockReason}
                     onChange={(e) => setBlockReason(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs font-medium text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
 
                 <button
                   type="submit"
-                  className="w-full bg-[#1EB8BF] hover:bg-[#19a1a7] text-black font-black text-xs uppercase tracking-wider py-3 rounded-xl transition-all"
+                  className="w-full bg-[#ED3078] hover:bg-[#d82469] text-white font-black text-xs uppercase py-3 rounded-xl transition-all cursor-pointer"
                 >
-                  Cambiar Estado de Disponibilidad
+                  Alternar Bloqueo de Fecha
                 </button>
               </form>
             </div>
 
-            <div className="md:col-span-7 bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+            <div className="lg:col-span-2 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-4">
               <h3 className="font-heading font-black text-lg text-white uppercase">Fechas Bloqueadas Activas</h3>
-              
               {blockedDates.length === 0 ? (
-                <p className="text-xs text-zinc-400 font-medium">No hay fechas bloqueadas manualmente.</p>
+                <p className="text-xs text-zinc-400">No hay fechas bloqueadas actualmente.</p>
               ) : (
                 <div className="space-y-2">
-                  {blockedDates.map((b) => (
-                    <div
-                      key={b.date}
-                      className="bg-zinc-950 p-3.5 rounded-xl border border-zinc-800 flex items-center justify-between text-xs"
-                    >
+                  {blockedDates.map((b, idx) => (
+                    <div key={idx} className="bg-black/60 border border-zinc-800 rounded-xl p-3 flex items-center justify-between">
                       <div>
-                        <strong className="text-[#1EB8BF] font-bold text-sm">{b.date}</strong>
-                        <span className="text-zinc-400 font-medium block">{b.reason}</span>
+                        <span className="font-black text-white text-xs block">{b.date}</span>
+                        <span className="text-[11px] text-zinc-400">{b.reason}</span>
                       </div>
                       <button
-                        onClick={() => toggleBlockDate(b.date)}
-                        className="p-2 rounded-lg bg-zinc-900 border border-zinc-700 text-white font-black hover:bg-zinc-800 text-xs uppercase"
+                        onClick={() => toggleBlockDate(b.date, b.reason, b.branchId || 'all')}
+                        className="px-2.5 py-1 rounded-lg bg-zinc-800 text-xs font-bold text-red-400 hover:bg-zinc-700 cursor-pointer"
                       >
                         Desbloquear
                       </button>
@@ -483,119 +864,381 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
                 </div>
               )}
             </div>
+
           </div>
         )}
 
-        {/* Tab 3: Cargar Reserva Manual */}
+        {/* ========================================================================= */}
+        {/* TAB 4: CARGA MANUAL DE RESERVA                                            */}
+        {/* ========================================================================= */}
         {activeTab === 'nueva' && (
-          <div className="max-w-2xl mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-6 sm:p-8 space-y-5">
-            <h3 className="font-heading font-black text-xl text-white uppercase">Cargar Cumpleaños Presencial o Telefónico</h3>
+          <div className="max-w-2xl mx-auto bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sm:p-8 space-y-5">
+            <div className="flex items-center gap-2 border-b border-zinc-800 pb-3">
+              <Plus className="w-5 h-5 text-[#A3BA13]" />
+              <h2 className="font-heading font-black text-lg text-white uppercase">Carga Manual de Festejo</h2>
+            </div>
 
-            <form onSubmit={handleCreateManual} className="space-y-4 text-xs font-medium">
-              <div className="grid grid-cols-2 gap-4">
+            <form onSubmit={handleCreateManual} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-zinc-300 uppercase">Sucursal</label>
+                <select
+                  disabled={isFranquista}
+                  value={manualBranchId}
+                  onChange={(e) => setManualBranchId(e.target.value)}
+                  className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
+                >
+                  {branches.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Fecha</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Fecha</label>
                   <input
                     type="date"
                     required
                     value={manualDate}
                     onChange={(e) => setManualDate(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Turno</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Turno</label>
                   <select
                     value={manualSlot}
                     onChange={(e) => setManualSlot(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white font-bold"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   >
                     {TIME_SLOTS.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.title} ({s.timeRange})
-                      </option>
+                      <option key={s.id} value={s.id}>{s.title} ({s.timeRange})</option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Nombre Adulto</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Nombre Adulto *</label>
                   <input
                     type="text"
                     required
-                    placeholder="Padre / Madre"
                     value={manualParent}
                     onChange={(e) => setManualParent(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">WhatsApp</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Celular WhatsApp</label>
                   <input
-                    type="text"
-                    placeholder="221..."
+                    type="tel"
                     value={manualPhone}
                     onChange={(e) => setManualPhone(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Cumpleañer@</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Cumpleañer@ *</label>
                   <input
                     type="text"
                     required
-                    placeholder="Nombre niño"
                     value={manualChild}
                     onChange={(e) => setManualChild(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Edad</label>
+                  <label className="text-xs font-bold text-zinc-300 uppercase">Edad</label>
                   <input
                     type="number"
                     value={manualAge}
                     onChange={(e) => setManualAge(Number(e.target.value))}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="font-black text-white uppercase">Chicos Est.</label>
-                  <input
-                    type="number"
-                    value={manualKids}
-                    onChange={(e) => setManualKids(Number(e.target.value))}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                    className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2.5 text-xs text-white"
                   />
                 </div>
               </div>
 
               <div className="space-y-1">
-                <label className="font-black text-white uppercase">Notas Adicionales</label>
+                <label className="text-xs font-bold text-zinc-300 uppercase">Notas internas</label>
                 <textarea
                   rows={2}
                   value={manualNotes}
                   onChange={(e) => setManualNotes(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-white"
+                  className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-[#1EB8BF] hover:bg-[#19a1a7] text-black font-black text-xs uppercase tracking-wider py-3 rounded-xl transition-all"
+                className="w-full bg-[#A3BA13] text-black font-black text-xs uppercase py-3.5 rounded-xl transition-all cursor-pointer"
               >
-                Cargar y Confirmar Reserva
+                Guardar Reserva Manual
               </button>
             </form>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 5 (SUPERADMIN): GESTIÓN DE SUCURSALES / FRANQUICIAS                    */}
+        {/* ========================================================================= */}
+        {isSuperAdmin && activeTab === 'sucursales' && (
+          <div className="space-y-6">
+            
+            <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <div>
+                <h2 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
+                  <Store className="w-5 h-5 text-[#ED3078]" /> Franquicias & Sucursales Activas
+                </h2>
+                <p className="text-xs text-zinc-400">Escala el negocio añadiendo nuevas sucursales y franquistas</p>
+              </div>
+
+              <button
+                onClick={() => setIsAddingBranch(!isAddingBranch)}
+                className="px-3.5 py-2 rounded-xl bg-[#ED3078] text-white font-black text-xs uppercase flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Nueva Sucursal
+              </button>
+            </div>
+
+            {/* New Branch Form Drawer */}
+            {isAddingBranch && (
+              <form onSubmit={handleAddBranchSubmit} className="bg-zinc-900 border-2 border-[#ED3078] rounded-3xl p-6 space-y-4 animate-in fade-in duration-200">
+                <h3 className="font-heading font-black text-base text-white uppercase">Alta de Nueva Sucursal</h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Nombre de Sucursal *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: El Galpón Calle 20"
+                      value={newBranchName}
+                      onChange={(e) => setNewBranchName(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Dirección *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Calle 20 Nº 1450"
+                      value={newBranchAddress}
+                      onChange={(e) => setNewBranchAddress(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Teléfono de Contacto</label>
+                    <input
+                      type="text"
+                      placeholder="221 555-4321"
+                      value={newBranchPhone}
+                      onChange={(e) => setNewBranchPhone(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">WhatsApp para Derivación (Directo)</label>
+                    <input
+                      type="text"
+                      placeholder="5492215554321"
+                      value={newBranchWhatsapp}
+                      onChange={(e) => setNewBranchWhatsapp(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingBranch(false)}
+                    className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-bold uppercase"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-[#ED3078] text-white text-xs font-black uppercase"
+                  >
+                    Guardar y Habilitar Sucursal
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Branches List */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {branches.map((b) => {
+                const branchResCount = reservations.filter(r => r.branchId === b.id).length;
+                return (
+                  <div key={b.id} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-5 h-5 text-[#1EB8BF]" />
+                        <h4 className="font-heading font-black text-base text-white uppercase">{b.name}</h4>
+                      </div>
+                      <button
+                        onClick={() => handleToggleBranchActive(b.id, b.isActive)}
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase cursor-pointer ${
+                          b.isActive ? 'bg-[#A3BA13] text-black' : 'bg-zinc-800 text-zinc-400'
+                        }`}
+                      >
+                        {b.isActive ? 'Activa' : 'Pausada'}
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-zinc-300">{b.address}, {b.city}</p>
+                    <p className="text-xs text-zinc-400">WhatsApp: {b.whatsappNumber} • Tel: {b.phone}</p>
+                    
+                    <div className="pt-2 border-t border-zinc-800 flex justify-between items-center text-xs text-zinc-400">
+                      <span>Reservas históricas: <strong className="text-white">{branchResCount}</strong></span>
+                      <span className="text-[11px] text-zinc-500 font-mono">ID: {b.id}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* TAB 6 (SUPERADMIN): GESTIÓN DE USUARIOS Y ROLES                           */}
+        {/* ========================================================================= */}
+        {isSuperAdmin && activeTab === 'usuarios' && (
+          <div className="space-y-6">
+            
+            <div className="flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
+              <div>
+                <h2 className="font-heading font-black text-lg text-white uppercase flex items-center gap-2">
+                  <Users className="w-5 h-5 text-[#F2C700]" /> Gestión de Usuarios y Roles (4 Niveles)
+                </h2>
+                <p className="text-xs text-zinc-400">Alta y asignación de permisos para Admins y Franquistas</p>
+              </div>
+
+              <button
+                onClick={() => setIsAddingUser(!isAddingUser)}
+                className="px-3.5 py-2 rounded-xl bg-[#F2C700] text-black font-black text-xs uppercase flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" /> Nuevo Usuario
+              </button>
+            </div>
+
+            {/* New User Form Drawer */}
+            {isAddingUser && (
+              <form onSubmit={handleAddUserSubmit} className="bg-zinc-900 border-2 border-[#F2C700] rounded-3xl p-6 space-y-4 animate-in fade-in duration-200">
+                <h3 className="font-heading font-black text-base text-white uppercase">Alta de Usuario con Rol</h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Nombre Completo *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Laura Benítez"
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Nombre de Usuario (Login) *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: franquicia20"
+                      value={newUserUsername}
+                      onChange={(e) => setNewUserUsername(e.target.value)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-zinc-300 uppercase">Rol Asignado *</label>
+                    <select
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+                      className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                    >
+                      <option value="franquista">Franquista (Gestor de Sucursal)</option>
+                      <option value="admin">Admin (Dueño del Negocio)</option>
+                      <option value="superadmin">SuperAdmin (Desarrollador)</option>
+                    </select>
+                  </div>
+
+                  {newUserRole === 'franquista' && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-zinc-300 uppercase">Sucursal Asignada *</label>
+                      <select
+                        value={newUserBranchId}
+                        onChange={(e) => setNewUserBranchId(e.target.value)}
+                        className="w-full bg-black border border-zinc-700 rounded-xl px-3 py-2 text-xs text-white"
+                      >
+                        <option value="">Seleccionar Sucursal</option>
+                        {branches.map((b) => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddingUser(false)}
+                    className="px-4 py-2 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-bold uppercase"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-[#F2C700] text-black text-xs font-black uppercase"
+                  >
+                    Dar de Alta Usuario
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Users List */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {appUsers.map((u) => (
+                <div key={u.uid} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-heading font-black text-base text-white">{u.displayName}</span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                      u.role === 'superadmin' 
+                        ? 'bg-[#ED3078] text-white' 
+                        : u.role === 'admin' 
+                        ? 'bg-[#F2C700] text-black' 
+                        : 'bg-[#1EB8BF] text-black'
+                    }`}>
+                      {u.role}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-400">Usuario: <strong className="text-zinc-200">{u.username}</strong> • Email: {u.email}</p>
+                  {u.assignedBranchName && (
+                    <p className="text-xs text-[#1EB8BF] font-bold">Sucursal Asignada: {u.assignedBranchName}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
           </div>
         )}
 
@@ -603,4 +1246,3 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onCloseAdmin }) 
     </div>
   );
 };
-

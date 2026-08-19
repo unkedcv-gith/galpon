@@ -1,4 +1,4 @@
-import { FaqItem, WorkshopProgram, TimeSlot, Reservation, AttractionItem } from '../types';
+import { FaqItem, WorkshopProgram, TimeSlot, Reservation, AttractionItem, Branch, AppUser, Inquiry } from '../types';
 
 export const BRAND_INFO = {
   name: 'El Galpón',
@@ -11,6 +11,82 @@ export const BRAND_INFO = {
   hours: 'Lunes a Viernes de 7:30 a 17:00 hs (Talleres) | Sábados y Domingos (Cumpleaños)',
   address: 'El Galpón - Espacio Recreativo Deportivo',
 };
+
+// Initial Branches (Calle 5 y Calle 13)
+export const INITIAL_BRANCHES: Branch[] = [
+  {
+    id: 'calle-5',
+    name: 'El Galpón Calle 5',
+    address: 'Calle 5 e/ 58 y 59 Nº 1234',
+    city: 'La Plata',
+    phone: '221 573-1047',
+    whatsappNumber: '5492215731047',
+    franquistaUserId: 'user_fran_calle5',
+    franquistaName: 'Martín Rodríguez',
+    franquistaEmail: 'franquicia5@elgalpon.com',
+    isActive: true,
+    color: '#ED3078',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'calle-13',
+    name: 'El Galpón Calle 13',
+    address: 'Calle 13 e/ 45 y 46 Nº 567',
+    city: 'La Plata',
+    phone: '221 489-3221',
+    whatsappNumber: '5492214893221',
+    franquistaUserId: 'user_fran_calle13',
+    franquistaName: 'Valeria Rossi',
+    franquistaEmail: 'franquicia13@elgalpon.com',
+    isActive: true,
+    color: '#1EB8BF',
+    createdAt: new Date().toISOString(),
+  },
+];
+
+// Initial Users for 4-level Role Hierarchy
+export const INITIAL_USERS: AppUser[] = [
+  {
+    uid: 'user_superadmin',
+    email: 'superadmin@elgalpon.com',
+    username: 'superadmin',
+    displayName: 'SuperAdmin Dev',
+    role: 'superadmin',
+    phone: '221 500-0001',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uid: 'user_admin',
+    email: 'admin@elgalpon.com',
+    username: 'admin',
+    displayName: 'Dueño General (Admin)',
+    role: 'admin',
+    phone: '221 500-0002',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uid: 'user_fran_calle5',
+    email: 'franquicia5@elgalpon.com',
+    username: 'franquicia5',
+    displayName: 'Martín Rodríguez (Franquista Calle 5)',
+    role: 'franquista',
+    assignedBranchId: 'calle-5',
+    assignedBranchName: 'El Galpón Calle 5',
+    phone: '221 573-1047',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    uid: 'user_fran_calle13',
+    email: 'franquicia13@elgalpon.com',
+    username: 'franquicia13',
+    displayName: 'Valeria Rossi (Franquista Calle 13)',
+    role: 'franquista',
+    assignedBranchId: 'calle-13',
+    assignedBranchName: 'El Galpón Calle 13',
+    phone: '221 489-3221',
+    createdAt: new Date().toISOString(),
+  },
+];
 
 export const TIME_SLOTS: TimeSlot[] = [
   {
@@ -203,8 +279,11 @@ const formatDate = (offsetDays: number) => {
 export const INITIAL_RESERVATIONS: Reservation[] = [
   {
     id: 'res_101',
+    branchId: 'calle-5',
+    branchName: 'El Galpón Calle 5',
     createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
     date: formatDate(3),
+    monthKey: formatDate(3).substring(0, 7),
     slotId: 'turn_afternoon_1',
     slotTime: '15:00 a 17:30 hs',
     parentName: 'Mariana Gómez',
@@ -222,8 +301,11 @@ export const INITIAL_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'res_102',
+    branchId: 'calle-5',
+    branchName: 'El Galpón Calle 5',
     createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
     date: formatDate(5),
+    monthKey: formatDate(5).substring(0, 7),
     slotId: 'turn_afternoon_2',
     slotTime: '18:30 a 21:00 hs',
     parentName: 'Gonzalo Pérez',
@@ -240,8 +322,11 @@ export const INITIAL_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'res_103',
+    branchId: 'calle-13',
+    branchName: 'El Galpón Calle 13',
     createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
     date: formatDate(10),
+    monthKey: formatDate(10).substring(0, 7),
     slotId: 'turn_morning',
     slotTime: '11:00 a 13:30 hs',
     parentName: 'Carolina Rossi',
@@ -258,8 +343,11 @@ export const INITIAL_RESERVATIONS: Reservation[] = [
   },
   {
     id: 'res_104',
+    branchId: 'calle-13',
+    branchName: 'El Galpón Calle 13',
     createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
     date: formatDate(12),
+    monthKey: formatDate(12).substring(0, 7),
     slotId: 'turn_afternoon_1',
     slotTime: '15:00 a 17:30 hs',
     parentName: 'Lucía Fernández',
@@ -276,9 +364,37 @@ export const INITIAL_RESERVATIONS: Reservation[] = [
   },
 ];
 
-export const INITIAL_BLOCKED_DATES: { date: string; reason: string }[] = [
+export const INITIAL_INQUIRIES: Inquiry[] = [
   {
+    id: 'inq_1',
+    branchId: 'calle-5',
+    branchName: 'El Galpón Calle 5',
+    senderName: 'Florencia Morales',
+    senderPhone: '221 445-5667',
+    senderEmail: 'flor.m@gmail.com',
+    topic: 'talleres',
+    message: 'Hola! Quería consultar aranceles mensuales para Peques en Acción (nene de 4 años).',
+    status: 'new',
+    createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+  },
+  {
+    id: 'inq_2',
+    branchId: 'calle-13',
+    branchName: 'El Galpón Calle 13',
+    senderName: 'Esteban Domínguez',
+    senderPhone: '221 667-7889',
+    senderEmail: 'esteban.d@gmail.com',
+    topic: 'por_un_dia',
+    message: 'Buenas tardes, quisiera saber si tienen cupo para el viernes por un día en Calle 13.',
+    status: 'contacted',
+    createdAt: new Date(Date.now() - 86400000 * 1).toISOString(),
+  },
+];
+
+export const INITIAL_BLOCKED_DATES: { branchId?: string; date: string; reason: string }[] = [
+  {
+    branchId: 'calle-5',
     date: formatDate(1),
-    reason: 'Mantenimiento preventivo Muro y Tirolesa',
+    reason: 'Mantenimiento preventivo Muro y Tirolesa Calle 5',
   },
 ];
